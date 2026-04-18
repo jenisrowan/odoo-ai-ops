@@ -207,7 +207,7 @@ resource "aws_iam_role_policy" "bedrock_agent_policy" {
         # 4. Action Group Lambda Invocation
         Action   = ["lambda:InvokeFunction"]
         Effect   = "Allow"
-        Resource = [aws_lambda_function.librarian.arn, aws_lambda_function.odoo_integrator.arn]
+        Resource = [aws_lambda_function.librarian.arn]
       },
       {
         # 5. Native Logging (Trace Delivery)
@@ -335,40 +335,4 @@ resource "aws_iam_role_policy" "librarian_secrets_policy" {
   })
 }
 
-resource "aws_iam_role" "odoo_integrator_lambda_role" {
-  name = "odoo-integrator-lambda-role"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action    = "sts:AssumeRole"
-        Principal = { Service = "lambda.amazonaws.com" }
-        Effect    = "Allow"
-      }
-    ]
-  })
-}
-resource "aws_iam_role_policy_attachment" "odoo_integrator_basic" {
-  role       = aws_iam_role.odoo_integrator_lambda_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-}
-resource "aws_iam_role_policy_attachment" "odoo_integrator_vpc" {
-  role       = aws_iam_role.odoo_integrator_lambda_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
-}
 
-resource "aws_iam_role_policy" "odoo_integrator_secrets_policy" {
-  name = "odoo-integrator-secrets-policy"
-  role = aws_iam_role.odoo_integrator_lambda_role.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action   = ["secretsmanager:GetSecretValue"]
-        Effect   = "Allow"
-        Resource = data.aws_secretsmanager_secret.odoo_integration_credentials.arn
-      }
-    ]
-  })
-}

@@ -36,17 +36,11 @@ This project provides a production-ready infrastructure for deploying **Odoo 19*
     ```
 
 3.  **Setup AWS Secrets**:
-    Before deploying, you must manually create three secrets in AWS Secrets Manager:
+    Before deploying, you must manually create two secrets in AWS Secrets Manager:
     - **Odoo Application Password**:
         - Choose **Other type of secret**.
         - Add a Key/Value pair: Key = `password`, Value = `[Your_Secure_Master_Password]`.
         - Name the secret: `odoo/admin/password`.
-    - **Odoo Integration Credentials (API Keys)**:
-        - Choose **Other type of secret**.
-        - Add Key/Value pairs:
-            - `login`: `api_agent` (or your dedicated integration user)
-            - `api_key`: `[Your_Odoo_API_Key]` (Generated in Odoo via User Settings)
-        - Name the secret: `odoo/integration/credentials`.
     - **Tavily API Key (for AI Research)**:
         - Choose **Other type of secret**.
         - Add a Key/Value pair: Key = `api_key`, Value = `[Your_Tavily_API_Key]`.
@@ -64,7 +58,7 @@ This infrastructure includes a built-in AI research pipeline using Amazon Bedroc
 - **Supervisor Agent**: Orchestrates research tasks using Claude 4.6 Sonnet.
 - **Web Search**: A "Librarian" Lambda function searches the web via **Tavily** for real-time news.
 - **Knowledge Base**: An RAG (Retrieval-Augmented Generation) system backed by **OpenSearch Serverless** and **Amazon Nova-2** allows the agent to search internal PDFs and 10-K filings stored in S3.
-- **Odoo Integration**: A dedicated "Odoo Integrator" Lambda pushes finalized reports directly into Odoo CRM records.
+- **Odoo Integration**: The Odoo backend synchronously invokes Bedrock and securely streams the generated reports directly into CRM records.
 
 ## Performance & Tuning
 

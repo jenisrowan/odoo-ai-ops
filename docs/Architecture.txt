@@ -33,13 +33,13 @@
                                                                    [ Amazon Bedrock ]
                                                                    (Supervisor Agent)
                                                                            |
-                                           ________________________________|________________________________
-                                          |                                |                                |
-                                          ▼                                ▼                                ▼
-                               [ Librarian (Lambda) ] <-----> [ Web Search (Tavily) ]          [ Odoo Integrator (Lambda) ]
-                                          |                                                                 |
-                                          ▼                                                                 ▼
-                               [ Knowledge Base ] <---------> [ S3 Research Vault ]                 [ Odoo CRM UI ]
+                                           ────────────────────────────────
+                                           |
+                                           ▼
+                               [ Librarian (Lambda) ] <-----> [ Web Search (Tavily) ]
+                                          |
+                                          ▼
+                               [ Knowledge Base ] <---------> [ S3 Research Vault ]
                                           |
                                           ▼
                              [ OpenSearch Serverless ]
@@ -57,4 +57,4 @@ Notes:
 Additional Infrastructure Notes (AI & Caching):
   - [ Amazon Bedrock ] Supervisor Agent (Claude 4.6 Sonnet) orchestrating autonomous research workflows.
   - [ Knowledge Base ] RAG implementation using Amazon Nova-2 embeddings and OpenSearch Serverless as a vector database.
-  - [ Research Lambdas ] Functions ("Librarian" & "Odoo Integrator") that execute research and sync data.
+  - [ Research Lambdas ] The "Librarian" function searches the web and indexes documents to assist the Agent.

@@ -37,7 +37,7 @@ def invoke_bedrock_agent(db_name, record_id, company_name):
                 agentId=agent_id,
                 agentAliasId=agent_alias_id,
                 sessionId=f"session-{record_id}",
-                inputText=f"Research {company_name} and submit the final report to Odoo database '{db_name}' for record ID {record_id}. Make sure to invoke the OdooIntegrator tool to save the results.",
+                inputText=f"Research the company '{company_name}' and provide a comprehensive final report.",
                 enableTrace=False
             )
             
@@ -47,12 +47,12 @@ def invoke_bedrock_agent(db_name, record_id, company_name):
                     chunk_data = event['chunk']['bytes'].decode('utf-8')
                     report_text += chunk_data
             
-            # We only use report_text as a fallback if the record is still empty.
-            record.invalidate_recordset() # Refresh from DB to see Lambda's changes
-            if not record.report_file:
-                logger.info(f"Lambda sync not detected for {record_id}, falling back to AI completion text.")
+            # Securely save the fetched report text to the targeted record using the local database context
+            if report_text:
                 record.report_file = base64.b64encode(report_text.encode('utf-8'))
-                record.report_filename = f"{company_name}_report.txt"
+                record.report_filename = f"{company_name.replace(' ', '_').lower()}_report.txt"
+            else:
+                logger.warning(f"AI returned empty report for {company_name}")
             
             logger.info(f"AI Research complete for {company_name}. Final message: {report_text[:100]}...")
                 

@@ -41,7 +41,7 @@ resource "aws_bedrockagent_agent" "supervisor" {
   agent_name                  = "CustomerResearchSupervisor"
   agent_resource_role_arn     = aws_iam_role.bedrock_agent_role.arn
   foundation_model            = "apac.anthropic.claude-sonnet-4-20250514-v1:0"
-  instruction                 = "You are a customer research supervisor. Your job is to compile a complete briefing by searching the web and the internal document vault to find all relevant information on a company. Once compiled, use the OdooIntegrator to push the final report back directly to Odoo. IMPORTANT: Always provide the current database_name and company_name when calling the OdooIntegrator."
+  instruction                 = "You are a customer research supervisor. Your job is to compile a complete briefing by searching the web and the internal document vault to find all relevant information on a company. Once compiled, provide the comprehensive final report."
   idle_session_ttl_in_seconds = 1800
   prepare_agent               = true
 }
@@ -123,92 +123,7 @@ resource "aws_bedrockagent_agent_action_group" "web_search" {
   }
 }
 
-resource "aws_bedrockagent_agent_action_group" "odoo_integrator" {
-  agent_id           = aws_bedrockagent_agent.supervisor.id
-  agent_version      = "DRAFT"
-  action_group_name  = "OdooIntegrator"
-  action_group_state = "ENABLED"
-  description        = "Use this action to submit the completed research briefing back to the Odoo ERP system."
 
-  lifecycle {
-    create_before_destroy = true
-  }
-  skip_resource_in_use_check = true
-  action_group_executor {
-    lambda = aws_lambda_function.odoo_integrator.arn
-  }
-
-  api_schema {
-    payload = jsonencode({
-      "openapi" = "3.0.0",
-      "info" = {
-        "title"       = "Odoo Integrator",
-        "description" = "Updates Odoo with research data",
-        "version"     = "1.0.0"
-      },
-      "paths" = {
-        "/submit" = {
-          "post" = {
-            "summary"     = "Submit final report to Odoo",
-            "description" = "Authenticates and creates a final research briefing on an Odoo Partner record.",
-            "operationId" = "SubmitReport",
-            "parameters"  = [],
-            "requestBody" = {
-              "description" = "Research data payload",
-              "required"    = true,
-              "content" = {
-                "application/json" = {
-                  "schema" = {
-                    "type"        = "object",
-                    "description" = "Schema for Odoo submission",
-                    "properties" = {
-                      "partner_id" = {
-                        "type"        = "integer",
-                        "description" = "Database ID for the Partner record."
-                      },
-                      "database_name" = {
-                        "type"        = "string",
-                        "description" = "Name of the target Odoo database."
-                      },
-                      "company_name" = {
-                        "type"        = "string",
-                        "description" = "The official name of the company being researched."
-                      },
-                      "report" = {
-                        "type"        = "string",
-                        "description" = "Final markdown report content."
-                      }
-                    },
-                    "required" = ["partner_id", "database_name", "company_name", "report"]
-                  }
-                }
-              }
-            },
-            "responses" = {
-              "200" = {
-                "description" = "Update successful",
-                "content" = {
-                  "application/json" = {
-                    "schema" = {
-                      "type"        = "object",
-                      "description" = "Schema for integrator response",
-                      "properties" = {
-                        "status" = {
-                          "type"        = "string",
-                          "description" = "Success or error message."
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    })
-  }
-}
 
 resource "aws_bedrockagent_agent_knowledge_base_association" "analyst" {
   agent_id             = aws_bedrockagent_agent.supervisor.id

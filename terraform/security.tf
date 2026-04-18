@@ -60,18 +60,7 @@ resource "aws_security_group" "ecs_node_sg" {
   }
 }
 
-resource "aws_security_group" "lambda_odoo_integrator_sg" {
-  name        = "lambda-odoo-integrator-sg"
-  description = "Security group for lambda odoo integrator"
-  vpc_id      = aws_vpc.main.id
 
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
 
 resource "aws_security_group" "ecs_task_sg" {
   name        = "odoo-ecs-task-sg"
@@ -89,13 +78,7 @@ resource "aws_security_group" "ecs_task_sg" {
     ]
   }
 
-  ingress {
-    description     = "Direct XML-RPC from Odoo Integrator Lambda only"
-    from_port       = 8069
-    to_port         = 8069
-    protocol        = "tcp"
-    security_groups = [aws_security_group.lambda_odoo_integrator_sg.id]
-  }
+
 
   egress {
     from_port   = 0
