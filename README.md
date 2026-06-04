@@ -58,7 +58,7 @@ This infrastructure includes a built-in AI research pipeline using Amazon Bedroc
 - **Supervisor Agent**: Orchestrates research tasks using Claude 4.6 Sonnet.
 - **Web Search**: A "Librarian" Lambda function searches the web via **Tavily** for real-time news.
 - **Knowledge Base**: An RAG (Retrieval-Augmented Generation) system backed by **OpenSearch Serverless** and **Amazon Nova-2** allows the agent to search internal PDFs and 10-K filings stored in S3.
-- **Odoo Integration**: The Odoo backend synchronously invokes Bedrock and securely streams the generated reports directly into CRM records.
+- **Odoo Integration**: The Odoo backend pushes research tasks to a Valkey task queue. A background consumer thread running in Odoo polls Valkey, invokes Bedrock, and securely saves the generated reports directly into CRM records.
 
 ## Performance & Tuning
 
@@ -73,7 +73,7 @@ To reduce configuration complexity and minimize costs, this project utilizes a *
 ### Valkey for Caching
 We use **Valkey 8.2 (Serverless)** through Amazon ElastiCache. Valkey is a fully open-source, high-performance alternative to Redis that offers significant cost savings (up to 33% with Serverless) while remaining fully compatible with Redis clients.
 - **Auto-Scaling**: The serverless configuration scales dynamically based on workload.
-- **State Management**: Used for real-time status tracking of long-running AI research tasks and agent coordination.
+- **State Management & Task Queueing**: Used as a high-performance message broker queue (Odoo -> Valkey -> AWS) and for real-time status tracking of long-running AI research tasks.
 
 ### EFS Storage Tiering
 To further optimize long-term storage costs for Odoo's filestore, a triple-tier lifecycle policy is implemented:

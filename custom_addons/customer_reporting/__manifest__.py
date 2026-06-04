@@ -10,6 +10,7 @@
     "data": [
         "security/ir.model.access.csv",
         "views/crm_reporting_views.xml",
+        "data/cron.xml",
     ],
     "installable": True,
     "application": True,
