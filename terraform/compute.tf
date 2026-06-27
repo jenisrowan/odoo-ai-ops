@@ -153,8 +153,6 @@ resource "aws_ecs_task_definition" "odoo" {
     aws_region             = var.region
     redis_host             = aws_elasticache_serverless_cache.valkey.endpoint[0].address
     redis_port             = aws_elasticache_serverless_cache.valkey.endpoint[0].port
-    bedrock_agent_id       = aws_bedrockagent_agent.supervisor.id
-    bedrock_agent_alias_id = aws_bedrockagent_agent_alias.prod.agent_alias_id
   })
 
   volume {

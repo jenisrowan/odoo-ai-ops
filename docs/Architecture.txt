@@ -26,24 +26,7 @@
 | [ Regional NAT Gateway ] | | [ Regional NAT Gateway ] | |               [ RDS Postgres ]    | |               [ RDS Postgres ]    |
 |                          | |                          | |               (Primary)    ====(Sync)====>      (Standby)               |
 +------------|-------------+ +------------|-------------+ +-----------------------------------+ +-----------------------------------+
-             |                            |                                |                                     |
-             └────────────────────────────┴──────(Egress to AWS APIs)──────┴─────────────────────────────────────┘
-                                                                           |
-                                                                           ▼
-                                                                   [ Amazon Bedrock ]
-                                                                   (Supervisor Agent)
-                                                                           |
-                                           ────────────────────────────────
-                                           |
-                                           ▼
-                               [ Librarian (Lambda) ] <-----> [ Web Search (Tavily) ]
-                                          |
-                                          ▼
-                               [ Knowledge Base ] <---------> [ S3 Research Vault ]
-                                          |
-                                          ▼
-                             [ OpenSearch Serverless ]
-                                  (Vector Store)
+
 
 Notes:
   - [ AWS WAF ] Security layer protecting CloudFront with Bot Control, Rate Limiting, and IP Reputation.
@@ -54,8 +37,5 @@ Notes:
   - [ EFS Mount Target ] are two mount targets of one shared EFS file system (aws_efs_file_system.odoo).
   - [ RDS Postgres ] is a single instance with multi_az=true; AWS manages the standby replica automatically.
 
-Additional Infrastructure Notes (AI & Caching):
-  - [ Amazon Bedrock ] Supervisor Agent (Claude 4.6 Sonnet) orchestrating autonomous research workflows.
-  - [ Knowledge Base ] RAG implementation using Amazon Nova-2 embeddings and OpenSearch Serverless as a vector database.
-  - [ Research Lambdas ] The "Librarian" function searches the web and indexes documents to assist the Agent.
-  - [ Valkey ] Centralized session store (via mangono-odoo-redis-session), task queue, and AI research status tracker.
+Additional Infrastructure Notes (Caching):
+  - [ Valkey ] Centralized session store (via mangono-odoo-redis-session) and task queue.

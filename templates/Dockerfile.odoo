@@ -5,9 +5,6 @@ USER root
 # Copy the custom Odoo configuration file
 COPY templates/odoo.conf /etc/odoo/odoo.conf
 
-# Copy custom addons
-COPY custom_addons /mnt/extra-addons
-
 # Install OS-level dependencies (none required for these python packages, but kept for future use if needed)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -25,8 +22,7 @@ RUN sed -i 's/\r$//' /docker-entrypoint-custom.sh && \
     chmod +x /docker-entrypoint-custom.sh
 
 # Ensure correct ownership
-RUN chown odoo:odoo /etc/odoo/odoo.conf && \
-    chown -R odoo:odoo /mnt/extra-addons
+RUN chown odoo:odoo /etc/odoo/odoo.conf
 
 USER odoo
 

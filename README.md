@@ -10,8 +10,7 @@ This project provides a production-ready infrastructure for deploying **Odoo 19*
 - **PgBouncer Pooling**: A High-Availability PgBouncer layer (2 tasks) runs on dedicated `t3.micro` instances to manage database connection pooling efficiently.
 - **Service Discovery**: ECS Service Connect (`odoo.local`) provides seamless internal communication between Odoo and PgBouncer using `pgbouncer.odoo.local`.
 - **Database**: Amazon RDS for PostgreSQL (Multi-AZ) handles application data.
-- **Cache & Sessions**: **Amazon ElastiCache for Valkey** (Serverless) provides centralized session storage (via `mangono-odoo-redis-session`), high-performance task queueing, and asynchronous status tracking for long-running AI research tasks.
-- **AI Research**: **Amazon Bedrock** integration with a Supervisor Agent, Knowledge Base (using **Amazon OpenSearch Serverless** as a vector store), and S3-based document vault.
+- **Cache & Sessions**: **Amazon ElastiCache for Valkey** (Serverless) provides centralized session storage (via `mangono-odoo-redis-session`) and high-performance task queueing.
 - **Storage**: Amazon EFS provides a shared file system for Odoo's `filestore`.
 - **Networking**: A VPC with both public and private subnets, secured with specialized Security Groups for ALB, Tasks, PgBouncer, and RDS.
 
@@ -36,15 +35,11 @@ This project provides a production-ready infrastructure for deploying **Odoo 19*
     ```
 
 3.  **Setup AWS Secrets**:
-    Before deploying, you must manually create two secrets in AWS Secrets Manager:
+    Before deploying, you must manually create a secret in AWS Secrets Manager:
     - **Odoo Application Password**:
         - Choose **Other type of secret**.
         - Add a Key/Value pair: Key = `password`, Value = `[Your_Secure_Master_Password]`.
         - Name the secret: `odoo/admin/password`.
-    - **Tavily API Key (for AI Research)**:
-        - Choose **Other type of secret**.
-        - Add a Key/Value pair: Key = `api_key`, Value = `[Your_Tavily_API_Key]`.
-        - Name the secret: `tavily/api_key`.
 
 4.  **Deploy**:
     ```bash
@@ -52,13 +47,7 @@ This project provides a production-ready infrastructure for deploying **Odoo 19*
     terraform apply
     ```
 
-## AI-Powered Customer Research
 
-This infrastructure includes a built-in AI research pipeline using Amazon Bedrock:
-- **Supervisor Agent**: Orchestrates research tasks using Claude 4.6 Sonnet.
-- **Web Search**: A "Librarian" Lambda function searches the web via **Tavily** for real-time news.
-- **Knowledge Base**: An RAG (Retrieval-Augmented Generation) system backed by **OpenSearch Serverless** and **Amazon Nova-2** allows the agent to search internal PDFs and 10-K filings stored in S3.
-- **Odoo Integration**: The Odoo backend pushes research tasks to a Valkey task queue. A background consumer thread running in Odoo polls Valkey, invokes Bedrock, and securely saves the generated reports directly into CRM records.
 
 ## Performance & Tuning
 
@@ -74,7 +63,7 @@ To reduce configuration complexity and minimize costs, this project utilizes a *
 We use **Valkey 8.2 (Serverless)** through Amazon ElastiCache. Valkey is a fully open-source, high-performance alternative to Redis that offers significant cost savings (up to 33% with Serverless) while remaining fully compatible with Redis clients.
 - **Auto-Scaling**: The serverless configuration scales dynamically based on workload.
 - **Session Storage**: Centralized session management via [`mangono-odoo-redis-session`](https://pypi.org/project/mangono-odoo-redis-session/), enabling seamless load balancing across multiple Odoo instances without sticky sessions.
-- **State Management & Task Queueing**: Used as a high-performance message broker queue (Odoo -> Valkey -> AWS) and for real-time status tracking of long-running AI research tasks.
+- **State Management & Task Queueing**: Used as a high-performance message broker queue.
 
 ### EFS Storage Tiering
 To further optimize long-term storage costs for Odoo's filestore, a triple-tier lifecycle policy is implemented:

@@ -10,8 +10,3 @@ VPC (10.0.0.0/16)
     ├── RDS PostgreSQL (Managed Database)
     ├── ElastiCache Valkey (Serverless Session Store, Task Queue & Caching)
     └── EFS Mount Targets (Persistent Storage)
-
-AI Infrastructure (Serverless/Edge)
-├── Amazon Bedrock (Global orchestration)
-├── Amazon OpenSearch Serverless (Vector Store)
-└── Amazon S3 (Research Document Vault)

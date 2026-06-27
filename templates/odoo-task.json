@@ -38,14 +38,6 @@
       {
         "name": "REDIS_URL",
         "value": "rediss://${redis_host}:${redis_port}"
-      },
-      {
-        "name": "BEDROCK_AGENT_ID",
-        "value": "${bedrock_agent_id}"
-      },
-      {
-        "name": "BEDROCK_AGENT_ALIAS_ID",
-        "value": "${bedrock_agent_alias_id}"
       }
     ],
     "secrets": [

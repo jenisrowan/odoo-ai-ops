@@ -7,10 +7,8 @@ Compute & Serverless Architecture
  │    └── PgBouncer Pool (t3.micro - HA x2)
  │         └── ECS Task (1:1 Ratio with Instance)
  │              └── PgBouncer Container (bitnami/pgbouncer)
- ├── AWS Lambda
- │    └── Librarian (Web Search & Tavily Integration)
- └── Amazon ElastiCache (Serverless)
-      └── Valkey 8.2 (Session store, task queue, status tracker, & agent cache)
+ ├── Amazon ElastiCache (Serverless)
+ │    └── Valkey 8.2 (Session store and task queue)
 
 Resource Allocation (Odoo Task: 1.6 vCPU / 7 GiB | PgBouncer: 1.25 vCPU / 0.5 GiB)
  ├── Host Reservation: 256 CPU / 512 MiB (OS & Daemon stability)

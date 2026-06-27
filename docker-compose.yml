@@ -11,7 +11,6 @@ services:
     volumes:
       - odoo-data:/var/lib/odoo
       - ./dev.conf:/etc/odoo/odoo.conf
-      - ./custom_addons:/mnt/extra-addons
     environment:
       - ODOO_STAGE=dev
       - REDIS_HOST=redis
