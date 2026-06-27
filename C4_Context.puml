@@ -1,0 +1,26 @@
+@startuml C4_Context
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title System Context Diagram - AI-Enhanced ERP & E-commerce Platform
+
+Person(admin, "Store Administrator", "Manages inventory, reviews AI fraud alerts, and approves actions via Slack.")
+Person(user, "Internet User", "Customers browsing the web store or interacting with public endpoints.")
+
+System(core_system, "AI-Enhanced ERP System", "Handles orders, queues/filters incoming webhooks, and orchestrates AI fraud detection.")
+
+System_Ext(shopify, "Shopify", "External E-commerce platform providing sales logs and risk assessments.")
+System_Ext(slack, "Slack", "Messaging platform used for interactive AI alerts, human-in-the-loop approvals, and notifications.")
+System_Ext(anthropic, "Anthropic API", "Claude 4.6 Engine used for logic processing, fraud analysis, and data calculations.")
+
+' Adjusted layout directions to prevent overlapping labels
+Rel_D(user, core_system, "Browses store / triggers endpoints", "HTTPS")
+Rel_D(admin, slack, "Reviews & approves Block Kit actions")
+
+Rel_U(shopify, core_system, "Sends 'Risk Assessment Changed' webhooks", "HTTPS")
+Rel_D(slack, core_system, "Sends interactive validation webhooks", "HTTPS")
+
+Rel_D(core_system, shopify, "Fetches logs, applies/releases fulfillment holds, and updates inventory", "GraphQL")
+Rel_U(core_system, slack, "Pushes interactive Block Kit cards", "REST API")
+Rel_R(core_system, anthropic, "Requests AI processing and data analysis", "REST API")
+
+@enduml

@@ -1,0 +1,52 @@
+@startuml C4_Container
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Container Diagram - AWS VPC Infrastructure
+
+Person(internet, "Web Users & Webhooks", "External traffic including Shopify/Slack webhooks")
+
+System_Boundary(aws, "AWS Cloud") {
+    Container(edge, "Edge Security & Cache", "AWS WAF + CloudFront", "Provides Global Edge Cache, Bot Control, and Rate Limiting")
+    Container(apigw, "API Gateway", "AWS API Gateway", "Ingests webhooks reliably and responds with 200 OK instantly")
+    ContainerQueue(sqs, "Webhook Queue", "Amazon SQS", "Buffers incoming webhooks for processing")
+    
+    System_Boundary(vpc, "VPC (10.0.0.0/16)") {
+        Container(alb, "Application Load Balancer", "AWS ALB", "Routes standard web traffic")
+        Container(nat, "Regional NAT Gateways", "AWS NAT GW", "Provides secure egress for private containers")
+        
+        System_Boundary(private_ecs, "Private Subnets (ECS Clusters)") {
+            Container(odoo, "Odoo 19 Service", "ECS EC2 Docker", "Core ERP. Polls SQS, evaluates risk, and gates AI tasks.")
+            Container(agent, "Shared App Cluster (Agent, PgBouncer, Valkey)", "ECS EC2 t3.small", "Hosts FastAPI LangGraph Agent, connection pooler, and state cache")
+            Container(langfuse, "Langfuse Server", "ECS Fargate Spot", "Asynchronous Trace Aggregator Engine")
+            ContainerDb(clickhouse, "ClickHouse Analytical Cluster", "ECS EC2 + EBS", "Hybrid OLAP & Vector Database for trace analytics and embeddings")
+        }
+
+        System_Boundary(data_layer, "Data Persistence") {
+            ContainerDb(rds, "RDS PostgreSQL", "Multi-AZ", "Primary DB for Odoo data, Langfuse config, and standby sync")
+            ContainerDb(efs, "Amazon EFS", "NFS", "Shared file system mount for Odoo community image")
+        }
+    }
+}
+
+System_Ext(external_apis, "External APIs", "Anthropic Claude, Shopify, Slack")
+
+Rel(internet, edge, "HTTPS Traffic / Webhooks")
+Rel(edge, alb, "Routes normal store traffic")
+Rel(edge, apigw, "Routes external webhooks")
+
+Rel(apigw, sqs, "Drops webhook payloads into queue")
+Rel(sqs, odoo, "Odoo workers poll pending webhooks", "Boto3/HTTPS")
+Rel(alb, odoo, "Routes web requests", "HTTP")
+
+Rel(odoo, agent, "Initiates AI task (only on high-risk/manual query)", "REST API")
+
+Rel(agent, external_apis, "API Calls", "HTTPS via NAT Gateway")
+Rel(odoo, efs, "Reads/Writes files", "NFS")
+Rel(odoo, agent, "Routes DB connections via Service Connect to PgBouncer", "TCP")
+Rel(agent, rds, "Reads/Writes ERP Data & Config", "TCP/PostgreSQL")
+
+Rel(agent, langfuse, "Streams execution metrics async", "HTTP")
+Rel(langfuse, rds, "Reads/Writes schema context", "TCP/PostgreSQL")
+Rel(langfuse, clickhouse, "Writes trace metric data", "TCP")
+
+@enduml
