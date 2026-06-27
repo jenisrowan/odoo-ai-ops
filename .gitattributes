@@ -1,0 +1,4 @@
+# Force shell scripts to always use Unix line endings (LF), even on Windows.
+# This prevents "no such file or directory" errors when Docker copies them
+# into Linux containers where #!/bin/bash\r is an invalid interpreter.
+*.sh text eol=lf

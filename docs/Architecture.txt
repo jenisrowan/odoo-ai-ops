@@ -58,3 +58,4 @@ Additional Infrastructure Notes (AI & Caching):
   - [ Amazon Bedrock ] Supervisor Agent (Claude 4.6 Sonnet) orchestrating autonomous research workflows.
   - [ Knowledge Base ] RAG implementation using Amazon Nova-2 embeddings and OpenSearch Serverless as a vector database.
   - [ Research Lambdas ] The "Librarian" function searches the web and indexes documents to assist the Agent.
+  - [ Valkey ] Centralized session store (via mangono-odoo-redis-session), task queue, and AI research status tracker.

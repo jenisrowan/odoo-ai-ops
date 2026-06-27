@@ -10,9 +10,9 @@ This project provides a production-ready infrastructure for deploying **Odoo 19*
 - **PgBouncer Pooling**: A High-Availability PgBouncer layer (2 tasks) runs on dedicated `t3.micro` instances to manage database connection pooling efficiently.
 - **Service Discovery**: ECS Service Connect (`odoo.local`) provides seamless internal communication between Odoo and PgBouncer using `pgbouncer.odoo.local`.
 - **Database**: Amazon RDS for PostgreSQL (Multi-AZ) handles application data.
-- **Cache**: **Amazon ElastiCache for Valkey** (Serverless) provides high-performance, asynchronous status tracking and coordination for long-running AI research tasks.
+- **Cache & Sessions**: **Amazon ElastiCache for Valkey** (Serverless) provides centralized session storage (via `mangono-odoo-redis-session`), high-performance task queueing, and asynchronous status tracking for long-running AI research tasks.
 - **AI Research**: **Amazon Bedrock** integration with a Supervisor Agent, Knowledge Base (using **Amazon OpenSearch Serverless** as a vector store), and S3-based document vault.
-- **Storage**: Amazon EFS provides a shared file system for Odoo's `filestore` and sessions.
+- **Storage**: Amazon EFS provides a shared file system for Odoo's `filestore`.
 - **Networking**: A VPC with both public and private subnets, secured with specialized Security Groups for ALB, Tasks, PgBouncer, and RDS.
 
 ## Prerequisites
@@ -73,6 +73,7 @@ To reduce configuration complexity and minimize costs, this project utilizes a *
 ### Valkey for Caching
 We use **Valkey 8.2 (Serverless)** through Amazon ElastiCache. Valkey is a fully open-source, high-performance alternative to Redis that offers significant cost savings (up to 33% with Serverless) while remaining fully compatible with Redis clients.
 - **Auto-Scaling**: The serverless configuration scales dynamically based on workload.
+- **Session Storage**: Centralized session management via [`mangono-odoo-redis-session`](https://pypi.org/project/mangono-odoo-redis-session/), enabling seamless load balancing across multiple Odoo instances without sticky sessions.
 - **State Management & Task Queueing**: Used as a high-performance message broker queue (Odoo -> Valkey -> AWS) and for real-time status tracking of long-running AI research tasks.
 
 ### EFS Storage Tiering

@@ -8,7 +8,7 @@ VPC (10.0.0.0/16)
     ├── ECS EC2 nodes (Odoo/PgBouncer cluster)
     ├── ECS Service Connect (Discovery: pgbouncer.odoo.local)
     ├── RDS PostgreSQL (Managed Database)
-    ├── ElastiCache Valkey (Serverless Task Queue & Caching)
+    ├── ElastiCache Valkey (Serverless Session Store, Task Queue & Caching)
     └── EFS Mount Targets (Persistent Storage)
 
 AI Infrastructure (Serverless/Edge)

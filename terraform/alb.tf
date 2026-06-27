@@ -12,7 +12,7 @@ resource "aws_lb" "main" {
 }
 
 # We don't want sticky session here - Sticky session feels like a temperory fix than a permanent solution
-# We will use a more robust EFS for session storage (in the future we might need to change it to ElastiCache)
+# We are using a more robust mechanism called redis session store than EFS for session storage.
 resource "aws_lb_target_group" "odoo" {
   port                 = 80
   protocol             = "HTTP"
