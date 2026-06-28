@@ -10,10 +10,11 @@ System(core_system, "AI-Enhanced ERP System", "Handles orders, queues/filters in
 
 System_Ext(shopify, "Shopify", "External E-commerce platform providing sales logs and risk assessments.")
 System_Ext(slack, "Slack", "Messaging platform used for interactive AI alerts, human-in-the-loop approvals, and notifications.")
-System_Ext(anthropic, "Anthropic API", "Claude 4.6 Engine used for logic processing, fraud analysis, and data calculations.")
+System_Ext(anthropic, "Anthropic API", "Claude Engine used for logic processing, fraud analysis, and data calculations.")
 
 ' Adjusted layout directions to prevent overlapping labels
 Rel_D(user, core_system, "Browses store / triggers endpoints", "HTTPS")
+Rel_D(admin, core_system, "Manages ERP and triggers AI tasks", "HTTPS")
 Rel_D(admin, slack, "Reviews & approves Block Kit actions")
 
 Rel_U(shopify, core_system, "Sends 'Risk Assessment Changed' webhooks", "HTTPS")

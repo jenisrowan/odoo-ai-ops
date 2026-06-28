@@ -1,0 +1,183 @@
+================================================================================
+                     MONTHLY COST ANALYSIS — AWS INFRASTRUCTURE
+                     Odoo AI Ops (us-east-1 Region Pricing)
+================================================================================
+
+Assumptions:
+  • All prices in USD/month unless stated otherwise.
+  • EC2 pricing uses On-Demand rates (no Reserved Instances or Savings Plans).
+  • Odoo uses m7i-flex.large (2 vCPU, 8 GiB RAM).
+  • Shared App Cluster and ClickHouse use t3.small (2 vCPU, 2 GiB RAM).
+  • RDS PostgreSQL uses db.t4g.small (2 vCPU, 2 GiB RAM) Multi-AZ.
+  • HA model: 1 active instance per service. 2nd instance boots on demand
+    via ECS auto-scaling (not always-on) for Odoo and Shared App only.
+  • VPC Endpoints: Gateway for S3 (free). No interface endpoints.
+  • NAT Gateway is used for external API egress and SQS polling.
+  • "Idle" = infrastructure running with zero order volume.
+  • "Low" = ~100 flagged orders/day (webhook-triggered AI tasks).
+  • "Growth" = ~1,000 flagged orders/day.
+  • Order Risk Profile (of flagged orders):
+      - No/Very Low Risk orders are bypassed by Odoo (0 AI tokens used).
+      - 70% of flagged orders are Medium Risk (Claude 4.5 Haiku).
+      - 30% of flagged orders are High Risk (Claude 4.6 Sonnet).
+
+
+---  SECTION 1: FIXED COSTS (Always-On Infrastructure)  -----------------------
+
++-------------------------------------+------------------+-------+-----------+
+| Service                             | Spec             | Qty   | $/Month   |
++-------------------------------------+------------------+-------+-----------+
+| COMPUTE                             |                  |       |           |
+|   Odoo 19 ECS EC2                   | m7i-flex.large   | 1     |   $68.68  |
+|   Shared App Cluster (Agent+PgB)    | t3.small         | 1     |   $15.18  |
+|   ClickHouse Analytical Node        | t3.small         | 1     |   $15.18  |
+|   Langfuse Server (Fargate Spot)    | 1 vCPU/2GB       | 1     |   $11.00  |
+|   Lambda Authorizer                 | 128MB ARM        | —     |    $0.20  |
++-------------------------------------+------------------+-------+-----------+
+| SUBTOTAL COMPUTE                    |                  |       |  $110.24  |
++-------------------------------------+------------------+-------+-----------+
+|                                     |                  |       |           |
+|   Auto-Scale Surge (on-demand 2nd)  |                  | 0-2   | Variable  |
+|   Odoo scales at CPU > 70%          | m7i-flex.large   |       | $0.094/hr |
+|   Shared App scales at CPU > 70%    | t3.small         |       | $0.021/hr |
+|   (Billed only during active hours) |                  |       |           |
++-------------------------------------+------------------+-------+-----------+
+|                                     |                  |       |           |
+| DATABASE & CACHE                    |                  |       |           |
+|   RDS PostgreSQL (Multi-AZ)         | db.t4g.small     | 1     |   $49.64  |
+|   RDS Storage (gp3)                 | 20 GB            | 1     |    $2.30  |
+|   ElastiCache Serverless (Valkey)   | 100 MB min floor | 1     |    $9.13  |
++-------------------------------------+------------------+-------+-----------+
+| SUBTOTAL DATABASE & CACHE           |                  |       |   $61.07  |
++-------------------------------------+------------------+-------+-----------+
+|                                     |                  |       |           |
+| STORAGE                             |                  |       |           |
+|   Amazon EFS (Odoo files only)      | ~1 GB Std        | 2 mt  |    $0.30  |
+|   EBS gp3 (ClickHouse hot data)     | 50 GB            | 1     |    $4.00  |
+|   Amazon S3 (ClickHouse cold tier)  | ~1 GB initial    | 1     |    $0.02  |
++-------------------------------------+------------------+-------+-----------+
+| SUBTOTAL STORAGE                    |                  |       |    $4.32  |
++-------------------------------------+------------------+-------+-----------+
+|                                     |                  |       |           |
+| NETWORKING                          |                  |       |           |
+|   NAT Gateway                       | Automatic        | 1     |   $32.85  |
+|   Application Load Balancer (fixed) | —                | 1     |   $16.43  |
+|   CloudFront Distribution           | —                | 1     |    $1.00  |
+|   AWS WAF (Web ACL + 5 Rules)       | —                | 1     |   $10.00  |
+|   VPC Endpoint: S3 (Gateway)        | Free             | 1     |    $0.00  |
++-------------------------------------+------------------+-------+-----------+
+| SUBTOTAL NETWORKING                 |                  |       |   $60.28  |
++-------------------------------------+------------------+-------+-----------+
+|                                                                            |
+|                              TOTAL FIXED COST:              ~$235.91/month |
+|                                                                            |
++-------------------------------------+------------------+-------+-----------+
+
+  Note: This is the "lights-on" cost with zero traffic. The three biggest
+  fixed line items are Compute ($110), Networking ($60), and RDS ($52).
+  ElastiCache Serverless adds a ~$9/mo floor (100 MB minimum metered storage).
+
+
+---  SECTION 2: VARIABLE COSTS (Per-Transaction / Usage-Based)  ---------------
+
++-------------------------------------+---------------+---------+------------+
+| Service                             | Unit Price    | Unit    | Notes      |
++-------------------------------------+---------------+---------+------------+
+| Claude 4.5 Haiku (Input)            | $1.00 / 1M    | tokens  | (a)        |
+| Claude 4.5 Haiku (Output)           | $5.00 / 1M    | tokens  | (a)        |
+| Claude 4.6 Sonnet (Input)           | $3.00 / 1M    | tokens  | (b)        |
+| Claude 4.6 Sonnet (Output)          | $15.00 / 1M   | tokens  | (b)        |
+| NAT Gateway Data Processing         | $0.045        | per GB  | (c)        |
+| API Gateway Requests                | $3.50 / 1M    | reqs    |            |
+| SQS Requests                        | $0.40 / 1M    | reqs    |            |
+| CloudFront Requests                 | $0.0100 / 10K | reqs    |            |
+| ALB (LCU-hours)                     | $0.008        | per LCU |            |
+| ElastiCache Serverless (ECPU)       | $0.0034 / 1M  | ECPU    | (d)        |
+| Auto-Scale: Odoo (when active)      | $0.094        | per hr  | (e)        |
+| Auto-Scale: Shared App (when active)| $0.021        | per hr  | (e)        |
++-------------------------------------+---------------+---------+------------+
+
+  (a) Haiku 4.5 used for 70% of orders (Medium Risk):
+      ~2,000 in / ~1,000 out = ~$0.007 per invocation.
+  (b) Sonnet 4.6 used for 30% of orders (High Risk):
+      ~2,000 in / ~1,000 out = ~$0.021 per invocation.
+      Weighted average Claude cost per order = ~$0.0112.
+  (c) NAT processes external API traffic AND SQS polling. S3 bypasses NAT.
+  (d) ElastiCache Serverless bills for active compute (ECPUs). Data storage 
+      is covered by the 100 MB minimum metered floor in fixed costs.
+  (e) 2nd instances boot on demand.
+
+
+---  SECTION 3: SCALING PROJECTIONS  ------------------------------------------
+
+Assumptions per flagged order:
+  • 1 SQS message received + 1 SQS delete = 2 SQS requests
+  • 1 API Gateway invocation (webhook ingestion)
+  • 1 Lambda Authorizer invocation
+  • 1 Shopify GraphQL call (~20 KB response) → via NAT
+  • 1 Claude invocation (~2K in / ~1K out, 70% Haiku 4.5 / 30% Sonnet 4.6) → via NAT
+  • 1 Slack Block Kit push + 1 Slack approval callback → via NAT
+  • SQS traffic (~5 KB/order) routes via NAT Gateway
+  • ~20 ElastiCache Serverless commands (state machine reads/writes)
+
++-----------------------------+--------------+--------------+--------------+
+|                             |    IDLE      |  LOW (100/d) | GROWTH (1K/d)|
+|                             |  0 orders    | 3,000/month  | 30,000/month |
++-----------------------------+--------------+--------------+--------------+
+| Fixed Infrastructure        |    $235.91   |     $235.91  |      $235.91 |
+| Anthropic Claude API        |      $0.00   |      $33.60  |      $336.00 |
+| NAT Data (APIs + SQS)       |      $0.10   |       $1.50  |       $15.00 |
+| API Gateway                 |      $0.00   |       $0.03  |        $0.32 |
+| SQS Requests                |      $0.00   |       $0.00  |        $0.02 |
+| ALB (LCU usage)             |      $0.50   |       $2.00  |        $8.00 |
+| CloudFront (requests)       |      $0.10   |       $0.50  |        $3.00 |
+| ElastiCache (ECPUs)         |      $0.00   |       $0.01  |        $0.10 |
+| Auto-Scale Surge (est.)     |      $0.00   |       $0.00  |       $11.50 |
++-----------------------------+--------------+--------------+--------------+
+| ESTIMATED TOTAL             |   ~$237/mo   |    ~$274/mo  |      ~$610/mo|
++-----------------------------+--------------+--------------+--------------+
+
+  Key Insight: Blending Claude 4.5 Haiku for 70% of medium-risk orders and
+  Sonnet 4.6 for 30% of high-risk orders dramatically reduces variable costs. Moving
+  Valkey to ElastiCache Serverless completely removes state management overhead
+  and memory contention from your application nodes.
+
+
+---  SECTION 4: COST OPTIMIZATION LEVERS  -------------------------------------
+
++---+------------------------------------+-------------+----------------------+
+| # | Optimization                       | Savings     | Tradeoff             |
++---+------------------------------------+-------------+----------------------+
+| 1 | EC2 Savings Plans (1yr)            | ~30-40%     | Upfront commitment   |
+|   |   m7i-flex.large + t3.small hrs    | on compute  |                      |
++---+------------------------------------+-------------+----------------------+
+| 2 | RDS Reserved Instance (1yr)        | ~35%        | Upfront commitment   |
+|   |   db.t4g.small Multi-AZ            | on RDS      |                      |
++---+------------------------------------+-------------+----------------------+
+| 3 | Prompt caching (Anthropic)         | ~50-90%     | Cache invalidation   |
+|   |   Cache system prompts             | on input    | on prompt changes    |
+|   |                                    | tokens      |                      |
++---+------------------------------------+-------------+----------------------+
+| 4 | EFS Infrequent Access (IA)         | ~90%        | 128KB min charge per |
+|   |   for cold Odoo filestores         | on storage  | file, higher I/O     |
++---+------------------------------------+-------------+----------------------+
+| 5 | S3 Intelligent-Tiering             | ~40-70%     | Small monthly        |
+|   |   for ClickHouse cold data         | on storage  | monitoring fee       |
++---+------------------------------------+-------------+----------------------+
+
+  With Savings Plans alone (#1 + #2), the fixed compute/DB cost drops,
+  bringing the growth-scale deployment to ~$520/mo.
+
+
+---  SECTION 5: COST RISK FLAGS  ----------------------------------------------
+
+  ⚠ db.t4g.small CPU CREDIT DEPLETION
+    The db.t4g.small is a burstable instance. Under sustained heavy
+    queries (e.g., Langfuse writing trace data while Odoo polls actively),
+    CPU credits can deplete, throttling database performance to baseline.
+    Monitor CPUCreditBalance in CloudWatch. If sustained < 20 credits,
+    consider enabling Unlimited Mode ($0.05/vCPU-hr for surplus credits).
+
+  ⚠ t3.small MEMORY CEILING (Shared App Cluster)
+    The t3.small has only 2 GiB RAM shared across PgBouncer and FastAPI.
+    Heavy LangGraph workloads could still cause OOM kills. Monitor ECS MemoryUtilization.

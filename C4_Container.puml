@@ -3,50 +3,74 @@
 
 title Container Diagram - AWS VPC Infrastructure
 
+LAYOUT_TOP_DOWN()
+
 Person(internet, "Web Users & Webhooks", "External traffic including Shopify/Slack webhooks")
 
 System_Boundary(aws, "AWS Cloud") {
     Container(edge, "Edge Security & Cache", "AWS WAF + CloudFront", "Provides Global Edge Cache, Bot Control, and Rate Limiting")
-    Container(apigw, "API Gateway", "AWS API Gateway", "Ingests webhooks reliably and responds with 200 OK instantly")
+    Container(apigw, "API Gateway", "AWS API Gateway", "Ingests webhooks reliably")
+    Container(lambda, "Lambda Authorizer", "AWS Lambda", "Verifies signatures & Slack challenges synchronously")
     ContainerQueue(sqs, "Webhook Queue", "Amazon SQS", "Buffers incoming webhooks for processing")
     
     System_Boundary(vpc, "VPC (10.0.0.0/16)") {
         Container(alb, "Application Load Balancer", "AWS ALB", "Routes standard web traffic")
-        Container(nat, "Regional NAT Gateways", "AWS NAT GW", "Provides secure egress for private containers")
+        Container(nat, "Regional NAT Gateways", "AWS NAT GW", "Egress for external API calls only (Anthropic, Shopify, Slack)")
+        Container(vpc_endpoints, "VPC Endpoints", "Gateway", "S3 Gateway")
         
         System_Boundary(private_ecs, "Private Subnets (ECS Clusters)") {
-            Container(odoo, "Odoo 19 Service", "ECS EC2 Docker", "Core ERP. Polls SQS, evaluates risk, and gates AI tasks.")
-            Container(agent, "Shared App Cluster (Agent, PgBouncer, Valkey)", "ECS EC2 t3.small", "Hosts FastAPI LangGraph Agent, connection pooler, and state cache")
+            Container(odoo, "Odoo 19 Service", "ECS on EC2", "Core ERP. Polls SQS, evaluates risk, and gates AI tasks.")
+            Container(agent, "Shared App Cluster (Agent, PgBouncer)", "ECS on EC2", "Hosts FastAPI LangGraph Agent and connection pooler")
             Container(langfuse, "Langfuse Server", "ECS Fargate Spot", "Asynchronous Trace Aggregator Engine")
-            ContainerDb(clickhouse, "ClickHouse Analytical Cluster", "ECS EC2 + EBS", "Hybrid OLAP & Vector Database for trace analytics and embeddings")
+            ContainerDb(clickhouse, "ClickHouse Analytical Cluster", "ECS on EC2 + EBS/S3 Tiering", "Hybrid OLAP & Vector DB. Hot data on EBS, older on S3")
         }
 
         System_Boundary(data_layer, "Data Persistence") {
+            ContainerDb(valkey, "ElastiCache Serverless", "Valkey", "Fully managed state cache and telemetry buffer")
             ContainerDb(rds, "RDS PostgreSQL", "Multi-AZ", "Primary DB for Odoo data, Langfuse config, and standby sync")
-            ContainerDb(efs, "Amazon EFS", "NFS", "Shared file system mount for Odoo community image")
+            ContainerDb(efs, "Amazon EFS", "NFS", "Shared file system for Odoo filestores")
+            ContainerDb(s3, "Amazon S3", "S3 Bucket", "Cold storage for aged ClickHouse trace data")
         }
     }
 }
 
 System_Ext(external_apis, "External APIs", "Anthropic Claude, Shopify, Slack")
 
+' --- INGRESS FLOW ---
 Rel(internet, edge, "HTTPS Traffic / Webhooks")
 Rel(edge, alb, "Routes normal store traffic")
 Rel(edge, apigw, "Routes external webhooks")
 
-Rel(apigw, sqs, "Drops webhook payloads into queue")
-Rel(sqs, odoo, "Odoo workers poll pending webhooks", "Boto3/HTTPS")
+' --- WEBHOOK INGESTION ---
+Rel_R(apigw, lambda, "Verifies auth & challenge", "Sync")
+Rel(apigw, sqs, "Drops verified webhooks into queue")
+
+' --- VPC INGRESS & SQS POLLING ---
 Rel(alb, odoo, "Routes web requests", "HTTP")
+Rel(odoo, nat, "Polls pending webhooks", "HTTPS")
+Rel(nat, sqs, "Forwards polling requests", "HTTPS")
 
-Rel(odoo, agent, "Initiates AI task (only on high-risk/manual query)", "REST API")
+' --- EGRESS TO EXTERNAL APIs ---
+Rel(agent, nat, "Shopify GraphQL, Anthropic & Slack REST", "HTTPS")
+Rel(nat, external_apis, "Egress traffic to external services", "HTTPS")
 
-Rel(agent, external_apis, "API Calls", "HTTPS via NAT Gateway")
+' --- CORE ECS SERVICES (Lateral) ---
+Rel_R(odoo, agent, "REST API (AI tasks) + PgBouncer", "HTTPS/TCP")
+Rel_L(agent, odoo, "XML-RPC API calls", "HTTP via ECS Service Connect")
+
+' --- TELEMETRY ---
+Rel(agent, langfuse, "Background worker flushes buffered telemetry", "HTTP")
+Rel_R(langfuse, clickhouse, "Writes trace metric data", "TCP")
+
+' --- DATA PERSISTENCE (Bottom Layer) ---
 Rel(odoo, efs, "Reads/Writes files", "NFS")
-Rel(odoo, agent, "Routes DB connections via Service Connect to PgBouncer", "TCP")
-Rel(agent, rds, "Reads/Writes ERP Data & Config", "TCP/PostgreSQL")
-
-Rel(agent, langfuse, "Streams execution metrics async", "HTTP")
+Rel(agent, valkey, "Writes graph state & buffers telemetry", "Redis/TCP")
+Rel(valkey, agent, "Returns state & queued telemetry for flushing", "Redis/TCP")
+Rel(agent, rds, "Reads/Writes ERP Data via PgBouncer", "TCP/PostgreSQL")
 Rel(langfuse, rds, "Reads/Writes schema context", "TCP/PostgreSQL")
-Rel(langfuse, clickhouse, "Writes trace metric data", "TCP")
+
+' --- S3 OFFLOADING ---
+Rel(clickhouse, vpc_endpoints, "Offloads older data partitions", "S3 API")
+Rel(vpc_endpoints, s3, "Routes S3 traffic privately", "AWS Internal")
 
 @enduml

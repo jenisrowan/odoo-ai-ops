@@ -3,36 +3,44 @@
 
 title Component Diagram - Shared App EC2 Cluster & Data Flow
 
+LAYOUT_TOP_DOWN()
+
 Container(apigw, "API Gateway", "AWS", "Webhook entry point")
+Component(lambda_auth, "Lambda Authorizer", "AWS Lambda", "Verifies signatures & Slack challenges")
 ContainerQueue(sqs, "SQS Queue", "AWS", "Durable webhook buffer")
 Container(alb, "Application Load Balancer", "AWS ALB", "Entry point for normal web traffic")
 Container(odoo, "Odoo 19 Service", "ECS EC2", "ERP core service & AI Gatekeeper")
 Container(langfuse, "Langfuse Server", "ECS Fargate Spot", "Telemetry aggregation")
 ContainerDb(rds, "RDS PostgreSQL", "Multi-AZ", "Core database")
+ContainerDb(efs, "Amazon EFS", "AWS", "Shared file system for Odoo")
+ContainerDb(valkey, "ElastiCache Serverless", "Valkey", "Managed state cache and telemetry buffer")
 
 System_Boundary(shared_cluster, "Shared App EC2 Cluster") {
     Component(fastapi, "FastAPI & LangGraph Agent", "Python / Docker", "Executes workflows only when triggered by Odoo gatekeeper.")
-    Component(valkey, "Valkey Checkpointer", "In-Memory Data Store", "Retains LangGraph execution state graphs. Stores state when thread freezes waiting for Slack approval.")
     Component(pgbouncer, "PgBouncer", "Connection Pooler", "Pools DB connections to prevent starvational lockups.")
 }
 
+Rel(apigw, lambda_auth, "Authorizes request", "Sync")
 Rel(apigw, sqs, "Enqueues incoming webhooks", "HTTPS")
 Rel(sqs, odoo, "Workers poll and delete processed webhooks", "Boto3")
 Rel(alb, odoo, "Routes standard user traffic", "HTTP")
 
 Rel(odoo, fastapi, "Pushes/Initiates AI task for high-risk orders", "JSON/REST")
 Rel(odoo, pgbouncer, "Service Connect (pgbouncer.odoo.local)", "TCP")
+Rel(odoo, efs, "Reads/Writes web filestores (sessions, attachments)", "NFS")
 
-Rel(fastapi, valkey, "Serializes/Reads graph state", "Redis/TCP")
-Rel(fastapi, pgbouncer, "Local XML-RPC / DB Queries to Odoo records", "TCP")
+Rel(fastapi, valkey, "Writes graph state & buffers telemetry", "Redis/TCP")
+Rel(valkey, fastapi, "Returns state & queued telemetry for flushing", "Redis/TCP")
+Rel(fastapi, pgbouncer, "Direct DB Queries (read-only)", "TCP")
+Rel(fastapi, odoo, "XML-RPC API calls", "HTTP via ECS Service Connect")
 Rel(pgbouncer, rds, "Multiplexed DB connections", "PostgreSQL Wire Protocol")
 
-Rel(fastapi, langfuse, "Pushes async execution steps, metrics, and parameters", "HTTP")
+Rel(fastapi, langfuse, "Background worker flushes buffered telemetry", "HTTP")
 
 System_Ext(anthropic, "Anthropic Claude")
 System_Ext(slack, "Slack API")
 Rel(fastapi, anthropic, "Requests AI analysis", "HTTPS")
 Rel(fastapi, slack, "Pushes Block Kit cards for approval", "HTTPS")
-Rel(slack, fastapi, "Sends interactive validation callbacks", "HTTPS")
+Rel(slack, apigw, "Sends interactive validation callbacks", "HTTPS")
 
 @enduml
