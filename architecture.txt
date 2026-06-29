@@ -45,14 +45,14 @@
 |            |             | |            |             | |       |  [ ElastiCache Serverless (Valkey) ]<|---+                              |
 |            |             | |            |             | |       |                ▼                     |                                  |
 |            |             | |            |             | |       |          [ RDS Postgres ] <----------|-------+  [ RDS Postgres ]        |
-|            |             | |            |             | |       |       (Odoo & Langfuse Config)       |          (Standby Sync)          |
+|            |             | |            |             | |       |           (Odoo Database)            |          (Standby Sync)          |
 |            |             | |            |             | |       ▼                                      |                                  |
 |            |             | |            |             | | [ Langfuse Server (ECS Fargate Spot) ] <---+                                    |
 |            |             | |            |             | | (Asynchronous Trace Aggregator Engine)                                          |
-|            |             | |            |             | |        |                                                                        |
-|            |             | |            |             | |        ▼ (Trace Metrics Write Path)                                             |
-|            |             | |            |             | | [ ClickHouse Analytical Cluster ] (ECS on r6g.xlarge Nodes)                     |
-|            |             | |            |             | | (Hybrid OLAP & Vector DB, hot data on io2 EBS)                                  |
+|            |             | |            |             | |        |                     |                                                  |
+|            |             | |            |             | |        ▼ (Trace Metrics)     ▼ (Config)                                         |
+|            |             | |            |             | | [ ClickHouse Analytical ]  [ Langfuse RDS ]                                     |
+|            |             | |            |             | | (Hybrid OLAP & Vector DB)  (PostgreSQL)                                         |
 |            |             | |            |             | |        |                                                                        |
 |            |             | |            |             | |        ▼ (Tiered Storage Offload)                                               |
 |            |             | |            |             | |     [ Amazon S3 ] (Cold storage for aged trace data)                            |
@@ -90,7 +90,7 @@
 * **[ ElastiCache Serverless (Valkey) ]** Fully managed serverless caching engine used for instant sub-millisecond data retention. AWS manages scaling, high availability, and persistence natively without requiring manual AOF/EFS configurations or competing for resources on application nodes.
 * **[ Agent State & Checkpointing ]** LangGraph leverages **Amazon ElastiCache Serverless (Valkey)** to dynamically write, serialize, and read execution state graphs between automated node cycles or extended async breaks.
 * **[ Telemetry Layer (Langfuse & ClickHouse) ]** Completely self-hosted natively on AWS to bypass external monthly subscription services:
-* **Langfuse Server:** Deployed on **ECS Fargate Spot** tasks configured for strict cost optimization. The FastAPI agent buffers telemetry metrics into **Valkey** first, ensuring any brief Spot reclamation interruptions of Langfuse do not drop traces or delay upstream agent logic. Transactional configuration values write directly into a distinct schema context on your core **RDS Postgres** instance.
+* **Langfuse Server:** Deployed on **ECS Fargate Spot** tasks configured for strict cost optimization. The FastAPI agent buffers telemetry metrics into **Valkey** first, ensuring any brief Spot reclamation interruptions of Langfuse do not drop traces or delay upstream agent logic. Transactional configuration values write directly into a dedicated **RDS Postgres** instance (`db.t4g.small`).
 * **ClickHouse Server:** Runs on **ECS EC2 (`r6g.xlarge`)** nodes as an isolated analytical container layer. It utilizes the native Amazon EBS integration for ECS tasks to manage volume lifecycle automatically, and uses a **Tiered Storage Architecture**, maintaining recent, high-value data on high-throughput Amazon **io2 EBS volumes** for fast querying, while automatically offloading older, historical trace dumps to **Amazon S3** via the free **Gateway VPC Endpoint** to significantly reduce long-term storage costs.
 
 

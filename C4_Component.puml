@@ -12,6 +12,7 @@ Container(alb, "Application Load Balancer", "AWS ALB", "Entry point for normal w
 Container(odoo, "Odoo 19 Service", "ECS EC2", "ERP core service & AI Gatekeeper")
 Container(langfuse, "Langfuse Server", "ECS Fargate Spot", "Telemetry aggregation")
 ContainerDb(rds, "RDS PostgreSQL", "Multi-AZ", "Core database")
+ContainerDb(langfuse_rds, "Langfuse RDS", "PostgreSQL", "Dedicated DB for Langfuse")
 ContainerDb(efs, "Amazon EFS", "AWS", "Shared file system for Odoo")
 ContainerDb(valkey, "ElastiCache Serverless", "Valkey", "Managed state cache and telemetry buffer")
 
@@ -38,6 +39,7 @@ Rel(fastapi, odoo, "XML-RPC API calls", "HTTP via ECS Service Connect")
 Rel(pgbouncer, rds, "Multiplexed DB connections", "PostgreSQL Wire Protocol")
 
 Rel(fastapi, langfuse, "Background worker flushes buffered telemetry", "HTTP")
+Rel(langfuse, langfuse_rds, "Reads/Writes configuration", "TCP/PostgreSQL")
 
 System_Ext(anthropic, "Anthropic Claude")
 System_Ext(slack, "Slack API")

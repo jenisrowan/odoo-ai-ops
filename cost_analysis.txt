@@ -49,10 +49,11 @@ Assumptions:
 |                                     |                  |       |           |
 | DATABASE & CACHE                    |                  |       |           |
 |   RDS PostgreSQL (Multi-AZ)         | db.m6g.xlarge    | 1     |  $413.18  |
+|   Langfuse RDS PostgreSQL           | db.t4g.small     | 1     |   $14.00  |
 |   RDS Storage (io2)                 | 20 GB            | 1     |    $3.00  |
 |   ElastiCache Serverless (Valkey)   | 100 MB min floor | 1     |    $9.13  |
 +-------------------------------------+------------------+-------+-----------+
-| SUBTOTAL DATABASE & CACHE           |                  |       |  $425.31  |
+| SUBTOTAL DATABASE & CACHE           |                  |       |  $439.31  |
 +-------------------------------------+------------------+-------+-----------+
 |                                     |                  |       |           |
 | STORAGE                             |                  |       |           |
@@ -67,18 +68,18 @@ Assumptions:
 |   NAT Gateway                       | Automatic        | 1     |   $32.85  |
 |   Application Load Balancer (fixed) | —                | 1     |   $16.43  |
 |   CloudFront Distribution           | —                | 1     |    $1.00  |
-|   AWS WAF (Web ACL + 5 Rules)       | —                | 1     |   $10.00  |
+|   AWS WAF (Web ACL + 5 Rules)       | —                | 1     |   $18.00  |
 |   VPC Endpoint: S3 (Gateway)        | Free             | 1     |    $0.00  |
 +-------------------------------------+------------------+-------+-----------+
-| SUBTOTAL NETWORKING                 |                  |       |   $60.28  |
+| SUBTOTAL NETWORKING                 |                  |       |   $68.28  |
 +-------------------------------------+------------------+-------+-----------+
 |                                                                            |
-|                              TOTAL FIXED COST:              ~$807.05/month |
+|                              TOTAL FIXED COST:              ~$829.05/month |
 |                                                                            |
 +-------------------------------------+------------------+-------+-----------+
 
   Note: This is the "lights-on" cost with zero traffic. The biggest
-  fixed line items are RDS ($413) and Compute ($311).
+  fixed line items are RDS ($427) and Compute ($311).
   ElastiCache Serverless adds a ~$9/mo floor (100 MB minimum metered storage).
 
 
@@ -128,7 +129,7 @@ Assumptions per flagged order:
 |                             |    IDLE      |  LOW (100/d) | GROWTH (1K/d)|
 |                             |  0 orders    | 3,000/month  | 30,000/month |
 +-----------------------------+--------------+--------------+--------------+
-| Fixed Infrastructure        |    $807.05   |     $807.05  |      $807.05 |
+| Fixed Infrastructure        |    $821.05   |     $821.05  |      $829.05 |
 | Anthropic Claude API        |      $0.00   |      $33.60  |      $336.00 |
 | NAT Data (APIs + SQS)       |      $0.10   |       $1.50  |       $15.00 |
 | API Gateway                 |      $0.00   |       $0.03  |        $0.32 |
@@ -138,7 +139,7 @@ Assumptions per flagged order:
 | ElastiCache (ECPUs)         |      $0.00   |       $0.01  |        $0.10 |
 | Auto-Scale Surge (est.)     |      $0.00   |       $0.00  |       $11.50 |
 +-----------------------------+--------------+--------------+--------------+
-| ESTIMATED TOTAL             |   ~$808/mo   |    ~$845/mo  |    ~$1,181/mo|
+| ESTIMATED TOTAL             |   ~$822/mo   |    ~$859/mo  |    ~$1,203/mo|
 +-----------------------------+--------------+--------------+--------------+
 
   Key Insight: Blending Claude 4.5 Haiku for 70% of medium-risk orders and

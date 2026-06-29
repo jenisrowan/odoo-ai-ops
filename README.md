@@ -46,10 +46,10 @@ The infrastructure is deployed inside a multi-AZ AWS VPC. Below is the conceptua
  [ ElastiCache Valkey ]  [ Langfuse Server ]   [ NAT Gateway ]
   (Serverless State)    (ECS Fargate Spot)            │
                                │                      ▼
-                               ▼             [ External APIs ]
-                         [ ClickHouse ]      - Anthropic Claude
-                         (Tiered to S3)      - Shopify GraphQL
-                                             - Slack Block Kit
+                  ┌────────────┴────────────┐   [ External APIs ]
+                  ▼                         ▼      - Anthropic Claude
+            [ ClickHouse ]         [ Langfuse RDS ]- Shopify GraphQL
+            (Tiered to S3)           (Postgres)    - Slack Block Kit
 ```
 
 For more detailed diagrams, refer to the PlantUML files in the repository root:
@@ -104,6 +104,6 @@ For more detailed diagrams, refer to the PlantUML files in the repository root:
 ## 💰 Cost Projections
 
 Detailed monthly estimations (based on `us-east-1` pricing) are located in [cost_analysis.txt](cost_analysis.txt):
-* **Fixed Lights-On Cost:** `~$808.00/month` (Valkey minimum floor, RDS Multi-AZ, NAT gateway, and ECS compute nodes).
-* **Low Tier (~100 flagged orders/day):** `~$845.00/month`.
-* **Growth Tier (~1,000 flagged orders/day):** `~$1,181.00/month`
+* **Fixed Lights-On Cost:** `~$829.00/month` (Valkey minimum floor, RDS Multi-AZ, Langfuse RDS, NAT gateway, and ECS compute nodes).
+* **Low Tier (~100 flagged orders/day):** `~$859.00/month`.
+* **Growth Tier (~1,000 flagged orders/day):** `~$1,205.00/month`
