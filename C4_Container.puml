@@ -20,7 +20,8 @@ System_Boundary(aws, "AWS Cloud") {
         
         System_Boundary(private_ecs, "Private Subnets (ECS Clusters)") {
             Container(odoo, "Odoo 19 Service", "ECS on EC2", "Core ERP. Polls SQS, evaluates risk, and gates AI tasks.")
-            Container(agent, "Shared App Cluster (Agent, PgBouncer)", "ECS on EC2", "Hosts FastAPI LangGraph Agent and connection pooler")
+            Container(agent, "FastAPI Agent Cluster", "ECS on EC2", "Hosts FastAPI LangGraph Agent")
+            Container(pgbouncer, "PgBouncer Cluster", "ECS on EC2", "Database connection pooler")
             Container(langfuse, "Langfuse Server", "ECS Fargate Spot", "Asynchronous Trace Aggregator Engine")
             ContainerDb(clickhouse, "ClickHouse Analytical Cluster", "ECS on EC2 + EBS/S3 Tiering", "Hybrid OLAP & Vector DB. Hot data on EBS, older on S3")
         }
@@ -55,7 +56,8 @@ Rel(agent, nat, "Shopify GraphQL, Anthropic & Slack REST", "HTTPS")
 Rel(nat, external_apis, "Egress traffic to external services", "HTTPS")
 
 ' --- CORE ECS SERVICES (Lateral) ---
-Rel_R(odoo, agent, "REST API (AI tasks) + PgBouncer", "HTTPS/TCP")
+Rel_R(odoo, agent, "REST API (AI tasks)", "HTTPS")
+Rel_R(odoo, pgbouncer, "Database traffic", "TCP via ECS Service Connect")
 Rel_L(agent, odoo, "XML-RPC API calls", "HTTP via ECS Service Connect")
 
 ' --- TELEMETRY ---
@@ -66,7 +68,7 @@ Rel_R(langfuse, clickhouse, "Writes trace metric data", "TCP")
 Rel(odoo, efs, "Reads/Writes files", "NFS")
 Rel(agent, valkey, "Writes graph state & buffers telemetry", "Redis/TCP")
 Rel(valkey, agent, "Returns state & queued telemetry for flushing", "Redis/TCP")
-Rel(agent, rds, "Reads/Writes ERP Data via PgBouncer", "TCP/PostgreSQL")
+Rel(pgbouncer, rds, "Database connection pooling", "TCP/PostgreSQL")
 Rel(langfuse, rds, "Reads/Writes schema context", "TCP/PostgreSQL")
 
 ' --- S3 OFFLOADING ---

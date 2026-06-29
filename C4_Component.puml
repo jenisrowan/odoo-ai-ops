@@ -1,7 +1,7 @@
 @startuml C4_Component
 !include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
 
-title Component Diagram - Shared App EC2 Cluster & Data Flow
+title Component Diagram - App Clusters & Data Flow
 
 LAYOUT_TOP_DOWN()
 
@@ -15,8 +15,11 @@ ContainerDb(rds, "RDS PostgreSQL", "Multi-AZ", "Core database")
 ContainerDb(efs, "Amazon EFS", "AWS", "Shared file system for Odoo")
 ContainerDb(valkey, "ElastiCache Serverless", "Valkey", "Managed state cache and telemetry buffer")
 
-System_Boundary(shared_cluster, "Shared App EC2 Cluster") {
+System_Boundary(fastapi_cluster, "FastAPI Agent Cluster") {
     Component(fastapi, "FastAPI & LangGraph Agent", "Python / Docker", "Executes workflows only when triggered by Odoo gatekeeper.")
+}
+
+System_Boundary(pgbouncer_cluster, "PgBouncer Cluster") {
     Component(pgbouncer, "PgBouncer", "Connection Pooler", "Pools DB connections to prevent starvational lockups.")
 }
 
@@ -31,7 +34,6 @@ Rel(odoo, efs, "Reads/Writes web filestores (sessions, attachments)", "NFS")
 
 Rel(fastapi, valkey, "Writes graph state & buffers telemetry", "Redis/TCP")
 Rel(valkey, fastapi, "Returns state & queued telemetry for flushing", "Redis/TCP")
-Rel(fastapi, pgbouncer, "Direct DB Queries (read-only)", "TCP")
 Rel(fastapi, odoo, "XML-RPC API calls", "HTTP via ECS Service Connect")
 Rel(pgbouncer, rds, "Multiplexed DB connections", "PostgreSQL Wire Protocol")
 

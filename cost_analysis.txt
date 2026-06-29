@@ -6,18 +6,20 @@
 Assumptions:
   • All prices in USD/month unless stated otherwise.
   • EC2 pricing uses On-Demand rates (no Reserved Instances or Savings Plans).
-  • Odoo uses m7i-flex.large (2 vCPU, 8 GiB RAM).
-  • Shared App Cluster and ClickHouse use t3.small (2 vCPU, 2 GiB RAM).
-  • RDS PostgreSQL uses db.t4g.small (2 vCPU, 2 GiB RAM) Multi-AZ.
+  • Odoo uses c6g.xlarge (4 vCPU, 8 GiB RAM).
+  • PgBouncer uses m6g.medium (1 vCPU, 4 GiB RAM).
+  • FastAPI Agent uses m6g.large (2 vCPU, 8 GiB RAM).
+  • ClickHouse uses r6g.xlarge (4 vCPU, 32 GiB RAM).
+  • RDS PostgreSQL uses db.m6g.xlarge (4 vCPU, 16 GiB RAM) Multi-AZ.
   • HA model: 1 active instance per service. 2nd instance boots on demand
-    via ECS auto-scaling (not always-on) for Odoo and Shared App only.
+    via ECS auto-scaling (not always-on) for Odoo, PgBouncer, and FastAPI.
   • VPC Endpoints: Gateway for S3 (free). No interface endpoints.
   • NAT Gateway is used for external API egress and SQS polling.
   • "Idle" = infrastructure running with zero order volume.
   • "Low" = ~100 flagged orders/day (webhook-triggered AI tasks).
   • "Growth" = ~1,000 flagged orders/day.
   • Order Risk Profile (of flagged orders):
-      - No/Very Low Risk orders are bypassed by Odoo (0 AI tokens used).
+      - No/Very Low Risk orders, and cheap orders (< $10) with Medium/High Risk, are bypassed and rejected automatically (0 AI tokens used).
       - 70% of flagged orders are Medium Risk (Claude 4.5 Haiku).
       - 30% of flagged orders are High Risk (Claude 4.6 Sonnet).
 
@@ -28,35 +30,37 @@ Assumptions:
 | Service                             | Spec             | Qty   | $/Month   |
 +-------------------------------------+------------------+-------+-----------+
 | COMPUTE                             |                  |       |           |
-|   Odoo 19 ECS EC2                   | m7i-flex.large   | 1     |   $68.68  |
-|   Shared App Cluster (Agent+PgB)    | t3.small         | 1     |   $15.18  |
-|   ClickHouse Analytical Node        | t3.small         | 1     |   $15.18  |
+|   Odoo 19 ECS EC2                   | c6g.xlarge       | 1     |   $68.68  |
+|   PgBouncer                         | m6g.medium       | 1     |   $28.03  |
+|   FastAPI Agent                     | m6g.large        | 1     |   $56.06  |
+|   ClickHouse Analytical Node        | r6g.xlarge       | 1     |  $147.17  |
 |   Langfuse Server (Fargate Spot)    | 1 vCPU/2GB       | 1     |   $11.00  |
 |   Lambda Authorizer                 | 128MB ARM        | —     |    $0.20  |
 +-------------------------------------+------------------+-------+-----------+
-| SUBTOTAL COMPUTE                    |                  |       |  $110.24  |
+| SUBTOTAL COMPUTE                    |                  |       |  $311.14  |
 +-------------------------------------+------------------+-------+-----------+
 |                                     |                  |       |           |
 |   Auto-Scale Surge (on-demand 2nd)  |                  | 0-2   | Variable  |
-|   Odoo scales at CPU > 70%          | m7i-flex.large   |       | $0.094/hr |
-|   Shared App scales at CPU > 70%    | t3.small         |       | $0.021/hr |
+|   Odoo scales at CPU > 70%          | c6g.xlarge       |       | $0.094/hr |
+|   PgBouncer scales at CPU > 70%     | m6g.medium       |       | $0.038/hr |
+|   FastAPI scales at CPU > 70%       | m6g.large        |       | $0.077/hr |
 |   (Billed only during active hours) |                  |       |           |
 +-------------------------------------+------------------+-------+-----------+
 |                                     |                  |       |           |
 | DATABASE & CACHE                    |                  |       |           |
-|   RDS PostgreSQL (Multi-AZ)         | db.t4g.small     | 1     |   $49.64  |
-|   RDS Storage (gp3)                 | 20 GB            | 1     |    $2.30  |
+|   RDS PostgreSQL (Multi-AZ)         | db.m6g.xlarge    | 1     |  $413.18  |
+|   RDS Storage (io2)                 | 20 GB            | 1     |    $3.00  |
 |   ElastiCache Serverless (Valkey)   | 100 MB min floor | 1     |    $9.13  |
 +-------------------------------------+------------------+-------+-----------+
-| SUBTOTAL DATABASE & CACHE           |                  |       |   $61.07  |
+| SUBTOTAL DATABASE & CACHE           |                  |       |  $425.31  |
 +-------------------------------------+------------------+-------+-----------+
 |                                     |                  |       |           |
 | STORAGE                             |                  |       |           |
 |   Amazon EFS (Odoo files only)      | ~1 GB Std        | 2 mt  |    $0.30  |
-|   EBS gp3 (ClickHouse hot data)     | 50 GB            | 1     |    $4.00  |
+|   EBS io2 (ClickHouse hot data)     | 50 GB            | 1     |   $10.00  |
 |   Amazon S3 (ClickHouse cold tier)  | ~1 GB initial    | 1     |    $0.02  |
 +-------------------------------------+------------------+-------+-----------+
-| SUBTOTAL STORAGE                    |                  |       |    $4.32  |
+| SUBTOTAL STORAGE                    |                  |       |   $10.32  |
 +-------------------------------------+------------------+-------+-----------+
 |                                     |                  |       |           |
 | NETWORKING                          |                  |       |           |
@@ -69,12 +73,12 @@ Assumptions:
 | SUBTOTAL NETWORKING                 |                  |       |   $60.28  |
 +-------------------------------------+------------------+-------+-----------+
 |                                                                            |
-|                              TOTAL FIXED COST:              ~$235.91/month |
+|                              TOTAL FIXED COST:              ~$807.05/month |
 |                                                                            |
 +-------------------------------------+------------------+-------+-----------+
 
-  Note: This is the "lights-on" cost with zero traffic. The three biggest
-  fixed line items are Compute ($110), Networking ($60), and RDS ($52).
+  Note: This is the "lights-on" cost with zero traffic. The biggest
+  fixed line items are RDS ($413) and Compute ($311).
   ElastiCache Serverless adds a ~$9/mo floor (100 MB minimum metered storage).
 
 
@@ -124,7 +128,7 @@ Assumptions per flagged order:
 |                             |    IDLE      |  LOW (100/d) | GROWTH (1K/d)|
 |                             |  0 orders    | 3,000/month  | 30,000/month |
 +-----------------------------+--------------+--------------+--------------+
-| Fixed Infrastructure        |    $235.91   |     $235.91  |      $235.91 |
+| Fixed Infrastructure        |    $807.05   |     $807.05  |      $807.05 |
 | Anthropic Claude API        |      $0.00   |      $33.60  |      $336.00 |
 | NAT Data (APIs + SQS)       |      $0.10   |       $1.50  |       $15.00 |
 | API Gateway                 |      $0.00   |       $0.03  |        $0.32 |
@@ -134,7 +138,7 @@ Assumptions per flagged order:
 | ElastiCache (ECPUs)         |      $0.00   |       $0.01  |        $0.10 |
 | Auto-Scale Surge (est.)     |      $0.00   |       $0.00  |       $11.50 |
 +-----------------------------+--------------+--------------+--------------+
-| ESTIMATED TOTAL             |   ~$237/mo   |    ~$274/mo  |      ~$610/mo|
+| ESTIMATED TOTAL             |   ~$808/mo   |    ~$845/mo  |    ~$1,181/mo|
 +-----------------------------+--------------+--------------+--------------+
 
   Key Insight: Blending Claude 4.5 Haiku for 70% of medium-risk orders and
@@ -149,10 +153,10 @@ Assumptions per flagged order:
 | # | Optimization                       | Savings     | Tradeoff             |
 +---+------------------------------------+-------------+----------------------+
 | 1 | EC2 Savings Plans (1yr)            | ~30-40%     | Upfront commitment   |
-|   |   m7i-flex.large + t3.small hrs    | on compute  |                      |
+|   |   c6g, m6g, r6g instances hrs      | on compute  |                      |
 +---+------------------------------------+-------------+----------------------+
 | 2 | RDS Reserved Instance (1yr)        | ~35%        | Upfront commitment   |
-|   |   db.t4g.small Multi-AZ            | on RDS      |                      |
+|   |   db.m6g.xlarge Multi-AZ           | on RDS      |                      |
 +---+------------------------------------+-------------+----------------------+
 | 3 | Prompt caching (Anthropic)         | ~50-90%     | Cache invalidation   |
 |   |   Cache system prompts             | on input    | on prompt changes    |
@@ -168,16 +172,3 @@ Assumptions per flagged order:
   With Savings Plans alone (#1 + #2), the fixed compute/DB cost drops,
   bringing the growth-scale deployment to ~$520/mo.
 
-
----  SECTION 5: COST RISK FLAGS  ----------------------------------------------
-
-  ⚠ db.t4g.small CPU CREDIT DEPLETION
-    The db.t4g.small is a burstable instance. Under sustained heavy
-    queries (e.g., Langfuse writing trace data while Odoo polls actively),
-    CPU credits can deplete, throttling database performance to baseline.
-    Monitor CPUCreditBalance in CloudWatch. If sustained < 20 credits,
-    consider enabling Unlimited Mode ($0.05/vCPU-hr for surplus credits).
-
-  ⚠ t3.small MEMORY CEILING (Shared App Cluster)
-    The t3.small has only 2 GiB RAM shared across PgBouncer and FastAPI.
-    Heavy LangGraph workloads could still cause OOM kills. Monitor ECS MemoryUtilization.

@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-06-29
+
+### Added
+- Added automatic order rejection policy for cheap, risk-flagged orders (< $10) directly at the Odoo evaluation stage to save AI compute.
+
+### Changed
+- Decoupled PgBouncer and FastAPI application layers into dedicated ECS clusters.
+- Upgraded default instance families to AWS Graviton instances (`c6g.xlarge` for Odoo, `r6g.xlarge` for ClickHouse, `db.m6g.xlarge` for RDS) and changed ClickHouse hot storage tier from `gp3` to `io2`.
+- Removed incorrect direct database query connections between FastAPI Agent and PgBouncer from the ASCII layout, `C4_Container.puml`, and `C4_Component.puml`.
+- Recalculated and updated all cost projections in `cost_analysis.txt` and `README.md`.
+
 ## [Unreleased] - 2026-06-28
 
 ### Added
