@@ -1,0 +1,41 @@
+name: Destroy Infrastructure via Terraform
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ap-south-1
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  destroy:
+    name: Destroy All Resources
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v6
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v6
+      with:
+        role-to-assume: ${{ vars.AWS_OIDC_ROLE_ARN }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v4
+
+    - name: Terraform Init
+      working-directory: ./terraform
+      run: terraform init
+
+    - name: Terraform Destroy
+      working-directory: ./terraform
+      run: |
+        terraform destroy -auto-approve \
+          -var="odoo_image_url=dummy" \
+          -var="nginx_image_url=dummy"

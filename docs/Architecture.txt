@@ -102,7 +102,7 @@
 
 **Path 1: Inventory Reconciliation (AI ops)**
 
-1. An administrator triggers an action in **Odoo**, which then initiates an AI task via REST API to the **FastAPI + LangGraph container**.
+1. An administrator triggers an action in **Odoo** for missing/mismatch stock, which then initiates an AI task via REST API to the **FastAPI + LangGraph container**.
 2. The task starts natively inside the FastAPI `m6g.large` EC2 private pool.
 3. The agent requests active sales logs via the **Shopify API** through the NAT Gateway.
 4. The agent interacts directly with Odoo via local XML-RPC calls routed through **ECS Service Connect** to check internal inventory moves.

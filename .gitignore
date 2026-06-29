@@ -216,3 +216,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+# Local .terraform folder
+.terraform/
+
+# Terraform state files
+*.tfstate
+*.tfstate.backup
+
+*.tfvars
+.terraform.lock.hcl

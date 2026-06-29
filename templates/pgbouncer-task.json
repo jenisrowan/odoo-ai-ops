@@ -1,0 +1,89 @@
+[
+  {
+    "name": "pgbouncer",
+    "image": "edoburu/pgbouncer:v1.25.1-p0",
+    "cpu": 1280,
+    "memory": 512,
+    "essential": true,
+    "environment": [
+      {
+        "name": "DB_HOST",
+        "value": "${db_host}"
+      },
+      {
+        "name": "DB_PORT",
+        "value": "5432"
+      },
+      {
+        "name": "DB_USER",
+        "value": "odoo"
+      },
+      {
+        "name": "DB_NAME",
+        "value": "*"
+      },
+      {
+        "name": "LISTEN_PORT",
+        "value": "6432"
+      },
+      {
+        "name": "POOL_MODE",
+        "value": "transaction"
+      },
+      {
+        "name": "MAX_CLIENT_CONN",
+        "value": "1000"
+      },
+      {
+        "name": "DEFAULT_POOL_SIZE",
+        "value": "40"
+      },
+      {
+        "name": "MAX_DB_CONNECTIONS",
+        "value": "45"
+      },
+      {
+        "name": "SERVER_RESET_QUERY",
+        "value": "DISCARD ALL"
+      },
+      {
+        "name": "QUERY_WAIT_TIMEOUT",
+        "value": "120"
+      },
+      {
+        "name": "QUERY_TIMEOUT",
+        "value": "300"
+      },
+      {
+        "name": "IDLE_TRANSACTION_TIMEOUT",
+        "value": "90"
+      },
+      {
+        "name": "AUTH_TYPE",
+        "value": "scram-sha-256"
+      }
+    ],
+    "secrets": [
+      {
+        "name": "DB_PASSWORD",
+        "valueFrom": "${db_password_arn}:password::"
+      }
+    ],
+    "portMappings": [
+      {
+        "name": "pgbouncer",
+        "containerPort": 6432,
+        "hostPort": 6432,
+        "protocol": "tcp"
+      }
+    ],
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "/ecs/odoo",
+        "awslogs-region": "${aws_region}",
+        "awslogs-stream-prefix": "pgbouncer"
+      }
+    }
+  }
+]

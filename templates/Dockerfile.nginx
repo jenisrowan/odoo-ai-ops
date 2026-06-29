@@ -1,0 +1,15 @@
+FROM nginx:1.26-alpine
+
+# Default conf is removed
+RUN rm /etc/nginx/conf.d/default.conf
+
+# Copy custom config into the image
+COPY templates/nginx.conf /etc/nginx/nginx.conf
+
+# Copy the graceful-shutdown entrypoint script
+COPY templates/docker-entrypoint-nginx.sh /docker-entrypoint-nginx.sh
+RUN chmod +x /docker-entrypoint-nginx.sh
+
+# Override default entrypoint so this script (PID 1) receives SIGTERM from ECS
+# and gracefully drains connections via 'nginx -s quit'.
+ENTRYPOINT ["/docker-entrypoint-nginx.sh"]

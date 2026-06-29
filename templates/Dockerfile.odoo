@@ -1,0 +1,31 @@
+FROM odoo:19.0
+
+USER root
+
+# Copy the custom Odoo configuration file
+COPY templates/odoo.conf /etc/odoo/odoo.conf
+
+# Install OS-level dependencies (none required for these python packages, but kept for future use if needed)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    wget && \
+    rm -rf /var/lib/apt/lists/* && \
+    pip install --no-cache-dir --break-system-packages boto3==1.34.46 redis==5.3.1 mangono-odoo-redis-session==1.4.1
+
+# Patch mangono-odoo-redis-session for Odoo 19 compatibility
+COPY templates/patch_redis_session.py /patch_redis_session.py
+RUN python3 /patch_redis_session.py && rm /patch_redis_session.py
+
+# Copy the graceful-shutdown entrypoint script and fix line endings (Windows CRLF → LF)
+COPY templates/docker-entrypoint.sh /docker-entrypoint-custom.sh
+RUN sed -i 's/\r$//' /docker-entrypoint-custom.sh && \
+    chmod +x /docker-entrypoint-custom.sh
+
+# Ensure correct ownership
+RUN chown odoo:odoo /etc/odoo/odoo.conf
+
+USER odoo
+
+# Override the base image entrypoint so this script (PID 1) receives SIGTERM
+# from ECS and can execute the graceful drain sequence.
+ENTRYPOINT ["/docker-entrypoint-custom.sh"]

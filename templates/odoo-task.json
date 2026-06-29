@@ -1,0 +1,90 @@
+[
+  {
+    "name": "odoo",
+    "image": "${odoo_image_url}",
+    "cpu": 1536,
+    "memory": 6912,
+    "stopTimeout": 120,
+    "essential": true,
+    "portMappings": [
+      {
+        "name": "odoo",
+        "containerPort": 8069,
+        "hostPort": 8069,
+        "protocol": "tcp"
+      }
+    ],
+    "environment": [
+      {
+        "name": "HOST",
+        "value": "pgbouncer.odoo.local"
+      },
+      {
+        "name": "PORT",
+        "value": "6432"
+      },
+      {
+        "name": "USER",
+        "value": "odoo"
+      },
+      {
+        "name": "REDIS_HOST",
+        "value": "${redis_host}"
+      },
+      {
+        "name": "REDIS_PORT",
+        "value": "${redis_port}"
+      },
+      {
+        "name": "REDIS_URL",
+        "value": "rediss://${redis_host}:${redis_port}"
+      }
+    ],
+    "secrets": [
+      {
+        "name": "PASSWORD",
+        "valueFrom": "${db_password_arn}:password::"
+      },
+      {
+        "name": "ODOO_ADMIN_PASSWD",
+        "valueFrom": "${admin_password_arn}:password::"
+      }
+    ],
+    "mountPoints": [
+      {
+        "sourceVolume": "odoo-efs",
+        "containerPath": "/var/lib/odoo"
+      }
+    ],
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "/ecs/odoo",
+        "awslogs-region": "${aws_region}",
+        "awslogs-stream-prefix": "odoo"
+      }
+    }
+  },
+  {
+    "name": "nginx",
+    "image": "${nginx_image_url}",
+    "cpu": 128,
+    "memory": 128,
+    "stopTimeout": 120,
+    "essential": true,
+    "portMappings": [
+      {
+        "containerPort": 80,
+        "hostPort": 80
+      }
+    ],
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "/ecs/odoo",
+        "awslogs-region": "${aws_region}",
+        "awslogs-stream-prefix": "nginx"
+      }
+    }
+  }
+]
