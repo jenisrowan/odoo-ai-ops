@@ -13,8 +13,8 @@ Assumptions:
   • RDS PostgreSQL uses db.m6g.xlarge (4 vCPU, 16 GiB RAM) Multi-AZ.
   • HA model: 1 active instance per service. 2nd instance boots on demand
     via ECS auto-scaling (not always-on) for Odoo, PgBouncer, and FastAPI.
-  • VPC Endpoints: Gateway for S3 (free). No interface endpoints.
-  • NAT Gateway is used for external API egress and SQS polling.
+  • VPC Endpoints: Gateway for S3 (free), Interface Endpoint for SQS (Amazon PrivateLink) across 2 AZs.
+  • NAT Gateway is used for external API egress. SQS polling routes via the VPC Endpoint.
   • "Idle" = infrastructure running with zero order volume.
   • "Low" = ~100 flagged orders/day (webhook-triggered AI tasks).
   • "Growth" = ~1,000 flagged orders/day.
@@ -70,11 +70,12 @@ Assumptions:
 |   CloudFront Distribution           | —                | 1     |    $1.00  |
 |   AWS WAF (Web ACL + 5 Rules)       | —                | 1     |   $18.00  |
 |   VPC Endpoint: S3 (Gateway)        | Free             | 1     |    $0.00  |
+|   VPC Endpoint: SQS (Interface)     | $0.01/hr per AZ  | 2 AZs |   $14.60  |
 +-------------------------------------+------------------+-------+-----------+
-| SUBTOTAL NETWORKING                 |                  |       |   $68.28  |
+| SUBTOTAL NETWORKING                 |                  |       |   $82.88  |
 +-------------------------------------+------------------+-------+-----------+
 |                                                                            |
-|                              TOTAL FIXED COST:              ~$829.05/month |
+|                              TOTAL FIXED COST:              ~$843.65/month |
 |                                                                            |
 +-------------------------------------+------------------+-------+-----------+
 
@@ -93,6 +94,7 @@ Assumptions:
 | Claude 4.6 Sonnet (Input)           | $3.00 / 1M    | tokens  | (b)        |
 | Claude 4.6 Sonnet (Output)          | $15.00 / 1M   | tokens  | (b)        |
 | NAT Gateway Data Processing         | $0.045        | per GB  | (c)        |
+| VPC Endpoint Data Processing        | $0.010        | per GB  | (f)        |
 | API Gateway Requests                | $3.50 / 1M    | reqs    |            |
 | SQS Requests                        | $0.40 / 1M    | reqs    |            |
 | CloudFront Requests                 | $0.0100 / 10K | reqs    |            |
@@ -107,10 +109,11 @@ Assumptions:
   (b) Sonnet 4.6 used for 30% of orders (High Risk):
       ~2,000 in / ~1,000 out = ~$0.021 per invocation.
       Weighted average Claude cost per order = ~$0.0112.
-  (c) NAT processes external API traffic AND SQS polling. S3 bypasses NAT.
+  (c) NAT processes external API traffic only. SQS and S3 bypass NAT.
   (d) ElastiCache Serverless bills for active compute (ECPUs). Data storage 
       is covered by the 100 MB minimum metered floor in fixed costs.
   (e) 2nd instances boot on demand.
+  (f) Applies to SQS interface endpoint data processing.
 
 
 ---  SECTION 3: SCALING PROJECTIONS  ------------------------------------------
@@ -122,16 +125,16 @@ Assumptions per flagged order:
   • 1 Shopify GraphQL call (~20 KB response) → via NAT
   • 1 Claude invocation (~2K in / ~1K out, 70% Haiku 4.5 / 30% Sonnet 4.6) → via NAT
   • 1 Slack Block Kit push + 1 Slack approval callback → via NAT
-  • SQS traffic (~5 KB/order) routes via NAT Gateway
+  • SQS traffic (~5 KB/order) routes via SQS Interface Endpoint
   • ~20 ElastiCache Serverless commands (state machine reads/writes)
 
 +-----------------------------+--------------+--------------+--------------+
 |                             |    IDLE      |  LOW (100/d) | GROWTH (1K/d)|
 |                             |  0 orders    | 3,000/month  | 30,000/month |
 +-----------------------------+--------------+--------------+--------------+
-| Fixed Infrastructure        |    $821.05   |     $821.05  |      $829.05 |
+| Fixed Infrastructure        |    $835.65   |     $835.65  |      $843.65 |
 | Anthropic Claude API        |      $0.00   |      $33.60  |      $336.00 |
-| NAT Data (APIs + SQS)       |      $0.10   |       $1.50  |       $15.00 |
+| Data (NAT Egress + VPCE)    |      $0.10   |       $1.50  |       $15.00 |
 | API Gateway                 |      $0.00   |       $0.03  |        $0.32 |
 | SQS Requests                |      $0.00   |       $0.00  |        $0.02 |
 | ALB (LCU usage)             |      $0.50   |       $2.00  |        $8.00 |
@@ -139,7 +142,7 @@ Assumptions per flagged order:
 | ElastiCache (ECPUs)         |      $0.00   |       $0.01  |        $0.10 |
 | Auto-Scale Surge (est.)     |      $0.00   |       $0.00  |       $11.50 |
 +-----------------------------+--------------+--------------+--------------+
-| ESTIMATED TOTAL             |   ~$822/mo   |    ~$859/mo  |    ~$1,203/mo|
+| ESTIMATED TOTAL             |   ~$836/mo   |    ~$873/mo  |    ~$1,218/mo|
 +-----------------------------+--------------+--------------+--------------+
 
   Key Insight: Blending Claude 4.5 Haiku for 70% of medium-risk orders and
@@ -171,5 +174,8 @@ Assumptions per flagged order:
 +---+------------------------------------+-------------+----------------------+
 
   With Savings Plans alone (#1 + #2), the fixed compute/DB cost drops,
-  bringing the growth-scale deployment to ~$520/mo.
-
+  bringing the growth-scale deployment to ~$535/mo.
+  
+  • 1 An Amazon SQS Interface VPC Endpoint may seem expensive and wasteful when the application is only polling small amounts of data (often just a few KB per request),
+      because Interface Endpoints have hourly charges in addition to data processing charges.However, organizations often use them to meet security, compliance, and network isolation requirements by keeping traffic private within the AWS network instead of accessing the public SQS endpoint.
+      

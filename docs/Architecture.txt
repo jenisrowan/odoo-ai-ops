@@ -24,9 +24,9 @@
 | PUBLIC SUBNET (AZ-a)     | | PUBLIC SUBNET (AZ-b)     | | PRIVATE SUBNET (AZ-a)             | | PRIVATE SUBNET (AZ-b)                     |
 | (10.0.1.0/24)            | | (10.0.4.0/24)            | | (10.0.2.0/24)                     | | (10.0.3.0/24)                             |
 +--------------------------+ +--------------------------+ +-----------------------------------+ +-------------------------------------------+
-| [ Application Load       ] | | [ Application Load   ] | |   [ Odoo 19 (ECS EC2 Nodes) ]       |     [ Odoo 19 (ECS EC2 Nodes) ]           |
-| [       Balancer         ] | | [       Balancer     ] | |   (Community Docker Image)          |     (Community Docker Image)              |
-|            |             | |            |             | |   (Polls SQS for Webhooks)          |     (Polls SQS for Webhooks)              |
+| [ Application Load       ] | | [ Application Load   ] | |   [ Nginx proxy -> Odoo 19  ]       |     [ Nginx proxy -> Odoo 19  ]           |
+| [       Balancer         ] | | [       Balancer     ] | |   (ECS EC2 Nodes with Sidecar)      |     (ECS EC2 Nodes with Sidecar)          |
+|            |             | |            |             | |   (Processes OrderRisk Webhooks)    |     (Processes OrderRisk Webhooks)        |
 |            |             | |            |             | |       /                             |       /                                   |
 |            +-------------|-|------------+-------------|-|------> ▼                            |-------> ▼                                 |
 |                          | |                          | |      [ EFS ]                                [ EFS ]                             |
@@ -35,6 +35,7 @@
 | [ Regional NAT Gateway ] | | [ Regional NAT Gateway ] | |       |    +-----------------------+         |    +-----------------------+     |
 |            |             | |            |             | |       |----| [ FastAPI Agent ]     |         |    | [ FastAPI Agent ]     |     |
 |            |             | |            |             | |       |    | (m6g.large EC2 nodes) |         |    | (m6g.large EC2 nodes) |     |
+|            |             | |            |             | |       |    | (Polls SQS Queue)     |         |    | (Polls SQS Queue)     |     |
 |            |             | |            |             | |       |    +-----------------------+         |    +-----------------------+     |
 |            |             | |            |             | |       |                                      |                                  |
 |            |             | |            |             | |       |    +-----------------------+         |    +-----------------------+     |
@@ -52,7 +53,7 @@
 |            |             | |            |             | |        |                     |                                                  |
 |            |             | |            |             | |        ▼ (Trace Metrics)     ▼ (Config)                                         |
 |            |             | |            |             | | [ ClickHouse Analytical ]  [ Langfuse RDS ]                                     |
-|            |             | |            |             | | (Hybrid OLAP & Vector DB)  (PostgreSQL)                                         |
+|            |             | |            |             | |        (Hybrid OLAP)        (PostgreSQL)                                        |
 |            |             | |            |             | |        |                                                                        |
 |            |             | |            |             | |        ▼ (Tiered Storage Offload)                                               |
 |            |             | |            |             | |     [ Amazon S3 ] (Cold storage for aged trace data)                            |
@@ -73,28 +74,28 @@
 ### Infrastructure Notes (Updated)
 * [ AWS WAF ] Security layer protecting CloudFront with Bot Control, Rate Limiting, and IP Reputation.
 * [ Load Balancer ] is a single ALB (aws_lb.main) spanning both public subnets for HA.
-* [ Regional NAT GW ] provides secure egress for external API calls only (Anthropic, Shopify, Slack). All AWS service traffic (SQS, S3) routes through VPC Endpoints.
-* [ VPC Endpoints ] Gateway VPC Endpoint for S3 (free) provides private connectivity without NAT data processing charges. ECS and RDS are in the same VPC and communicate directly without endpoints.
+* [ Regional NAT GW ] provides secure egress for external API calls only (Anthropic, Shopify, Slack).
+* [ VPC Endpoints ] Gateway VPC Endpoint for S3 (free) provides private connectivity without NAT data processing charges. Interface VPC Endpoint for SQS (Amazon PrivateLink) allows secure and private polling of the SQS queue without traversing the NAT Gateway. ECS and RDS are in the same VPC and communicate directly without endpoints.
 * [ Odoo Service ] Odoo connects to EFS Mounting target for file storage and PgBouncer for database pooling.
 * [ PgBouncer HA ] It uses ECS Service Connect (pgbouncer.odoo.local) for discovery.
 * [ EFS Mount Target ] are two mount targets of one shared EFS file system (aws_efs_file_system.odoo).
 * [ RDS Postgres ] is a db.m6g.xlarge instance with multi_az=true; AWS manages the standby replica automatically.
 
 * **[ Webhook Ingestion ]** Webhooks are routed by CloudFront to **AWS API Gateway**, which uses a **Lambda Authorizer** to verify HMAC signatures and handle synchronous challenge verifications, then drops verified payloads into an **Amazon SQS** queue.
-* **[ Load Balancer Routing ]** The Application Load Balancer routes standard backend web requests mapping directly to the **Odoo 19** container target groups.
-* **[ Odoo 19 Service ]** Deployed using the Odoo 19 community Docker image via native **ECS on EC2 (`c6g.xlarge` nodes)**. It polls **Amazon SQS** for pending webhooks, evaluates risk, gates AI tasks via REST API to the agent, binds directly to localized mount points referencing shared Amazon EFS file system for web filestores, and routes database traffic directly through the PgBouncer cluster discovery configuration.
+* **[ Load Balancer Routing ]** The Application Load Balancer routes standard backend web requests to the **Nginx** sidecar container, which reverse proxies to the **Odoo 19** container within the same task.
+* **[ Odoo 19 Service ]** Deployed using the Odoo 19 community Docker image via native **ECS on EC2 (`c6g.xlarge` nodes)**, alongside an **Nginx sidecar**. It receives forwarded webhook payloads from the FastAPI agent via JSON-RPC, evaluates risk, gates AI tasks, binds directly to localized mount points referencing shared Amazon EFS file system for web filestores, and routes database traffic directly through the PgBouncer cluster discovery configuration. Valkey is used to store session data.
 * **PgBouncer:** Runs on **ECS EC2 (`m6g.medium`)** nodes to handle dedicated lightweight database connection pooling.
-* **AI Agent Backend (FastAPI + LangGraph):** Runs on **ECS EC2 (`m6g.large`)** nodes to absorb unpredictable memory spikes caused by complex AI payloads, without impacting database connectivity.
+* **AI Agent Backend (FastAPI + LangGraph):** Runs on **ECS EC2 (`m6g.large`)** nodes. It polls the **Amazon SQS** queue, forwards webhook payloads to Odoo via JSON-RPC, runs the LangGraph AI agent workflows when triggered by Odoo, and writes results back to Odoo via JSON-RPC. Deployed on dedicated node sizes to absorb memory spikes without impacting core database connectivity.
 
 
-* **[ ElastiCache Serverless (Valkey) ]** Fully managed serverless caching engine used for instant sub-millisecond data retention. AWS manages scaling, high availability, and persistence natively without requiring manual AOF/EFS configurations or competing for resources on application nodes.
+* **[ ElastiCache Serverless (Valkey) ]** Fully managed serverless caching engine used for instant sub-millisecond data retention (shared for Odoo session storage and agent state graph checkpointing). AWS manages scaling, high availability, and persistence natively without requiring manual AOF/EFS configurations.
 * **[ Agent State & Checkpointing ]** LangGraph leverages **Amazon ElastiCache Serverless (Valkey)** to dynamically write, serialize, and read execution state graphs between automated node cycles or extended async breaks.
 * **[ Telemetry Layer (Langfuse & ClickHouse) ]** Completely self-hosted natively on AWS to bypass external monthly subscription services:
 * **Langfuse Server:** Deployed on **ECS Fargate Spot** tasks configured for strict cost optimization. The FastAPI agent buffers telemetry metrics into **Valkey** first, ensuring any brief Spot reclamation interruptions of Langfuse do not drop traces or delay upstream agent logic. Transactional configuration values write directly into a dedicated **RDS Postgres** instance (`db.t4g.small`).
 * **ClickHouse Server:** Runs on **ECS EC2 (`r6g.xlarge`)** nodes as an isolated analytical container layer. It utilizes the native Amazon EBS integration for ECS tasks to manage volume lifecycle automatically, and uses a **Tiered Storage Architecture**, maintaining recent, high-value data on high-throughput Amazon **io2 EBS volumes** for fast querying, while automatically offloading older, historical trace dumps to **Amazon S3** via the free **Gateway VPC Endpoint** to significantly reduce long-term storage costs.
 
 
-* **[ External API Egress ]** External API calls (Anthropic Claude, Shopify GraphQL, Slack REST) and AWS public services (SQS polling) route through the Regional NAT Gateway. S3 offloading is routed privately through the **Gateway VPC Endpoint**, eliminating unnecessary NAT data processing charges. Secure runtime authentication hooks via AWS Secrets Manager handle credentials for external endpoints.
+* **[ External API Egress ]** External API calls (Anthropic Claude, Shopify GraphQL, Slack REST) route through the Regional NAT Gateway. Secure runtime authentication hooks via AWS Secrets Manager handle credentials for external endpoints.
 
 ---
 
@@ -105,7 +106,7 @@
 1. An administrator triggers an action in **Odoo** for missing/mismatch stock, which then initiates an AI task via REST API to the **FastAPI + LangGraph container**.
 2. The task starts natively inside the FastAPI `m6g.large` EC2 private pool.
 3. The agent requests active sales logs via the **Shopify API** through the NAT Gateway.
-4. The agent interacts directly with Odoo via local XML-RPC calls routed through **ECS Service Connect** to check internal inventory moves.
+4. The agent interacts directly with Odoo via local JSON-RPC calls routed through **ECS Service Connect** to check internal inventory moves.
 
 
 5. Claude processes the variations via the Anthropic API, calculates the correct stock levels, and drafts a proposed synchronization fix.
@@ -115,8 +116,8 @@
 **Path 2: Fraud Detection (Autonomous Loop)**
 
 1. A production order is flagged by Shopify's OrderRisk system, triggering a webhook payload to **AWS API Gateway**, where the **Lambda Authorizer** verifies the HMAC signature before dropping it into the **Amazon SQS** queue.
-2. **Odoo workers** poll the SQS queue and evaluate the payload. If the order is very cheap (< $10) and marked with medium or high risk, the system automatically rejects/cancels the order in Shopify directly (without wasting AI compute). Otherwise, it initiates an AI task to the **FastAPI + LangGraph container** via REST API.
+2. **FastAPI SQS workers** poll the SQS queue privately via the VPC Interface Endpoint, retrieve the webhook payload, and forward it to **Odoo** via a private JSON-RPC call. Odoo workers receive the payload and evaluate it. If the order is very cheap (< $10) and marked with medium or high risk, Odoo automatically rejects/cancels the order in Shopify directly (without wasting AI compute). Otherwise, Odoo initiates an AI task back to the **FastAPI + LangGraph container** via a REST API call.
 3. The task initiates inside a LangGraph execution thread. If Shopify flagged the order as **Medium Risk**, the agent invokes **Claude Haiku** for a fast, low-cost pre-screening. If flagged as **High Risk**, it invokes **Claude Sonnet** for deep context gathering (e.g., cross-referencing IPs, validating billing/shipping mismatches).
 4. The agent pushes an interactive Block Kit card via the Slack API to the store manager. This card details the AI's fraud analysis and provides explicit [ Approve Order ] or [ Reject & Cancel ] action triggers.
 5. The active execution state freezes immediately; the thread safely stores its state machine details inside **ElastiCache Serverless** and terminates the active thread to save compute resources.
-6. A manager confirms or rejects the prompt inside the Slack interface. This passes a validation webhook response to **AWS API Gateway** and into the **SQS** queue. Odoo processes the webhook and passes the decision to FastAPI to pull the thread out of ElastiCache and seamlessly resume the workflow to execute the final decision (e.g., canceling the order in Shopify and syncing the status to Odoo).
+6. A manager confirms or rejects the prompt inside the Slack interface. This passes a validation webhook response to **AWS API Gateway** and into the **SQS** queue. FastAPI polls this queue, forwards the webhook callback to Odoo via JSON-RPC, and Odoo passes the decision back to FastAPI to pull the thread out of ElastiCache and seamlessly resume the workflow to execute the final decision (e.g., canceling the order in Shopify and syncing the status to Odoo).

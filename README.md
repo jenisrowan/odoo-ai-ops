@@ -31,10 +31,11 @@ The infrastructure is deployed inside a multi-AZ AWS VPC.
        [ AWS ALB ]                        [ AWS API Gateway ]
              │                                  │
              ▼                                  ▼
-     [ Odoo 19 Service ]                [ Lambda Authorizer ]
+      [ Nginx Sidecar ]                 [ Lambda Authorizer ]
+             │                                  │
+             ▼                                  ▼
+     [ Odoo 19 Service ]                  [ Amazon SQS ]
        (ECS on EC2)                             │
-             │                                  ▼
-             │                            [ Amazon SQS ]
              │                                  │
              └──────────► [ Odoo SQS Workers ] ◄┘
                                │

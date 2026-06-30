@@ -21,15 +21,17 @@ System_Boundary(aws, "AWS Cloud") {
 
         Container(alb, "Application Load Balancer", "AWS ALB", "Routes standard web traffic")
         Container(nat, "Regional NAT Gateways", "AWS NAT GW", "Egress for external API calls only (Anthropic, Shopify, Slack)")
-        Container(vpc_endpoints, "VPC Endpoints", "Gateway", "S3 Gateway")
+        Container(s3_endpoint, "S3 VPC Endpoint", "Gateway Endpoint", "Free S3 Gateway endpoint for private routing")
+        Container(sqs_endpoint, "SQS VPC Endpoint", "Interface Endpoint (PrivateLink)", "Enables private SQS access via ENIs")
 
         System_Boundary(private_ecs, "Private Subnets (ECS Clusters)") {
 
             Container(pgbouncer, "PgBouncer Cluster", "ECS on EC2", "Database connection pooler")
-            Container(agent, "FastAPI Agent Cluster", "ECS on EC2", "Hosts FastAPI LangGraph Agent")
-            Container(odoo, "Odoo 19 Service", "ECS on EC2", "Core ERP. Polls SQS, evaluates risk, and gates AI tasks.")
+            Container(agent, "FastAPI Agent Cluster", "ECS on EC2", "Hosts FastAPI LangGraph Agent. Polls SQS queue.")
+            Container(nginx, "Nginx Sidecar", "Docker Container", "Reverse proxy for Odoo")
+            Container(odoo, "Odoo 19 Service", "ECS on EC2", "Core ERP. Evaluates forwarded webhook risk and gates AI tasks.")
             
-            ContainerDb(clickhouse, "ClickHouse Analytical Cluster", "ECS on EC2 + EBS/S3 Tiering", "Hybrid OLAP & Vector DB. Hot data on EBS, older on S3")
+            ContainerDb(clickhouse, "ClickHouse Analytical Cluster", "ECS on EC2 + EBS/S3 Tiering", "OLAP DB. Hot data on EBS, older on S3")
             Container(langfuse, "Langfuse Server", "ECS Fargate Spot", "Asynchronous Trace Aggregator Engine")
 
         }
@@ -67,9 +69,10 @@ Rel(apigw, sqs, "Drops verified webhooks into queue")
 ' Application Flow
 '====================================================
 
-Rel(alb, odoo, "Routes web requests", "HTTP")
+Rel(alb, nginx, "Routes web requests", "HTTP")
+Rel(nginx, odoo, "Proxies traffic", "HTTP")
 Rel(odoo, agent, "REST API (AI tasks)", "HTTPS")
-Rel(agent, odoo, "XML-RPC API calls", "HTTP via ECS Service Connect")
+Rel(agent, odoo, "JSON-RPC API calls & webhook forwarding", "HTTP via ECS Service Connect")
 Rel(odoo, pgbouncer, "Database traffic", "TCP via ECS Service Connect")
 
 '====================================================
@@ -87,17 +90,18 @@ Rel(pgbouncer, rds, "Database connection pooling", "TCP/PostgreSQL")
 Rel(langfuse, langfuse_rds, "Reads/Writes schema context", "TCP/PostgreSQL")
 Rel(agent, valkey, "Writes graph state & buffers telemetry", "Redis/TCP")
 Rel(valkey, agent, "Returns state & queued telemetry for flushing", "Redis/TCP")
+Rel(odoo, valkey, "Stores session data", "rediss")
 Rel(odoo, efs, "Reads/Writes files", "NFS")
 
-Rel(clickhouse, vpc_endpoints, "Offloads older data partitions", "S3 API")
-Rel(vpc_endpoints, s3, "Routes S3 traffic privately", "AWS Internal")
+Rel(clickhouse, s3_endpoint, "Offloads older data partitions", "S3 API")
+Rel(s3_endpoint, s3, "Routes S3 traffic privately", "AWS Internal")
 
 '====================================================
 ' External APIs
 '====================================================
 
-Rel(odoo, nat, "Polls pending webhooks", "HTTPS")
-Rel(nat, sqs, "Forwards polling requests", "HTTPS")
+Rel(agent, sqs_endpoint, "Polls pending webhooks", "SQS API")
+Rel(sqs_endpoint, sqs, "Routes SQS traffic privately", "AWS Internal")
 Rel(agent, nat, "Shopify GraphQL, Anthropic & Slack REST", "HTTPS")
 Rel(nat, external_apis, "Egress traffic to external services", "HTTPS")
 
