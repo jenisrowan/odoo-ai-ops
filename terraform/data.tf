@@ -9,9 +9,7 @@ data "aws_caller_identity" "current" {}
 
 data "aws_region" "current" {}
 
-data "aws_secretsmanager_secret" "tavily_api_key" {
-  name = "tavily/api/key"
-}
+
 data "aws_secretsmanager_secret" "odoo_integration_credentials" {
   name = "odoo/integration/credentials"
 }

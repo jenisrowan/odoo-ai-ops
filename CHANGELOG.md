@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [Unreleased] - 2026-06-30
+
+### Changed
+- Merged the `hosting-only` branch from `odoo-aws-cloud` (`feature/hosting-only`) to establish a clean, stable baseline for highly-available Odoo 19 hosting by removing legacy AWS serverless AI components (Amazon Bedrock, OpenSearch Serverless, Lambda integrations) and custom addons.
+
 ## [Unreleased] - 2026-06-29
 
 ### Added
