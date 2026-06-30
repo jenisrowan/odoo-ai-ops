@@ -32,34 +32,34 @@
 |                          | |                          | |      [ EFS ]                                [ EFS ]                             |
 |                          | |                          | |       ^                                      ^                                  |
 |                          | |                          | |       |                                      |                                  |
-| [ Regional NAT Gateway ] | | [ Regional NAT Gateway ] | |       |    +-----------------------+         |    +-----------------------+     |
-|            |             | |            |             | |       |----| [ FastAPI Agent ]     |         |    | [ FastAPI Agent ]     |     |
-|            |             | |            |             | |       |    | (m6g.large EC2 nodes) |         |    | (m6g.large EC2 nodes) |     |
-|            |             | |            |             | |       |    | (Polls SQS Queue)     |         |    | (Polls SQS Queue)     |     |
-|            |             | |            |             | |       |    +-----------------------+         |    +-----------------------+     |
-|            |             | |            |             | |       |                                      |                                  |
-|            |             | |            |             | |       |    +-----------------------+         |    +-----------------------+     |
-|            |             | |            |             | |       |    | [ PgBouncer ]         |         |    | [ PgBouncer ]         |     |
-|            |             | |            |             | |       |    | (m6g.medium EC2 nodes)|         |    | (m6g.medium EC2 nodes)|     |
-|            |             | |            |             | |       |    +-----------|-----------+         |    +-----------|-----------+     |
-|            |             | |            |             | |       ▼                |                     |                ▼                 |
-|            |             | |            |             | |       |  [ ElastiCache Serverless (Valkey) ]<|---+                              |
-|            |             | |            |             | |       |                ▼                     |                                  |
-|            |             | |            |             | |       |          [ RDS Postgres ] <----------|-------+  [ RDS Postgres ]        |
-|            |             | |            |             | |       |           (Odoo Database)            |          (Standby Sync)          |
-|            |             | |            |             | |       ▼                                      |                                  |
-|            |             | |            |             | | [ Langfuse Server (ECS Fargate Spot) ] <---+                                    |
-|            |             | |            |             | | (Asynchronous Trace Aggregator Engine)                                          |
-|            |             | |            |             | |        |                     |                                                  |
-|            |             | |            |             | |        ▼ (Trace Metrics)     ▼ (Config)                                         |
-|            |             | |            |             | | [ ClickHouse Analytical ]  [ Langfuse RDS ]                                     |
-|            |             | |            |             | |        (Hybrid OLAP)        (PostgreSQL)                                        |
-|            |             | |            |             | |        |                                                                        |
-|            |             | |            |             | |        ▼ (Tiered Storage Offload)                                               |
-|            |             | |            |             | |     [ Amazon S3 ] (Cold storage for aged trace data)                            |
-+------------|-------------+ +------------|-------------+ +----------------------------------------------------------------------------------+
-             |                            |
-             ▼                            ▼ (Egress via NAT Gateways)
+| +---------------------------------------------------+ | |       |    +-----------------------+         |    +-----------------------+     |
+| |              [ Regional NAT Gateway ]             | | |       |----| [ FastAPI Agent ]     |         |    | [ FastAPI Agent ]     |     |
+| +-------------------------+-------------------------+ | |       |    | (m6g.large EC2 nodes) |         |    | (m6g.large EC2 nodes) |     |
+|                           |                           | |       |    | (Polls SQS Queue)     |         |    | (Polls SQS Queue)     |     |
+|                           |                           | |       |    +-----------------------+         |    +-----------------------+     |
+|                           |                           | |       |                                      |                                  |
+|                           |                           | |       |    +-----------------------+         |    +-----------------------+     |
+|                           |                           | |       |    | [ PgBouncer ]         |         |    | [ PgBouncer ]         |     |
+|                           |                           | |       |    | (m6g.medium EC2 nodes)|         |    | (m6g.medium EC2 nodes)|     |
+|                           |                           | |       |    +-----------|-----------+         |    +-----------|-----------+     |
+|                           |                           | |       ▼                |                     |                ▼                 |
+|                           |                           | |       |  [ ElastiCache Serverless (Valkey) ]<|---+                              |
+|                           |                           | |       |                ▼                     |                                  |
+|                           |                           | |       |          [ RDS Postgres ] <----------|-------+  [ RDS Postgres ]        |
+|                           |                           | |       |           (Odoo Database)            |          (Standby Sync)          |
+|                           |                           | |       ▼                                      |                                  |
+|                           |                           | | [ Langfuse Server (ECS Fargate Spot) ] <---+                                    |
+|                           |                           | | (Asynchronous Trace Aggregator Engine)                                          |
+|                           |                           | |        |                     |                                                  |
+|                           |                           | |        ▼ (Trace Metrics)     ▼ (Config)                                         |
+|                           |                           | | [ ClickHouse Analytical ]  [ Langfuse RDS ]                                     |
+|                           |                           | |        (Hybrid OLAP)        (PostgreSQL)                                        |
+|                           |                           | |        |                                                                        |
+|                           |                           | |        ▼ (Tiered Storage Offload)                                               |
+|                           |                           | |     [ Amazon S3 ] (Cold storage for aged trace data)                            |
++---------------------------+---------------------------+ +----------------------------------------------------------------------------------+
+                            |
+                            ▼ (Egress via NAT Gateway)
        +-------------------------------------------------------------+
        |                  External API Integration                   |
        |-------------------------------------------------------------|
@@ -105,8 +105,8 @@
 
 1. An administrator triggers an action in **Odoo** for missing/mismatch stock, which then initiates an AI task via REST API to the **FastAPI + LangGraph container**.
 2. The task starts natively inside the FastAPI `m6g.large` EC2 private pool.
-3. The agent requests active sales logs via the **Shopify API** through the NAT Gateway.
-4. The agent interacts directly with Odoo via local JSON-RPC calls routed through **ECS Service Connect** to check internal inventory moves.
+3. Odoo fetches active sales logs via the **Shopify API** through the NAT Gateway and passes this context to the agent.
+4. The agent interacts with Odoo via local JSON-RPC calls routed through **ECS Service Connect** to query further internal inventory moves.
 
 
 5. Claude processes the variations via the Anthropic API, calculates the correct stock levels, and drafts a proposed synchronization fix.
@@ -120,4 +120,4 @@
 3. The task initiates inside a LangGraph execution thread. If Shopify flagged the order as **Medium Risk**, the agent invokes **Claude Haiku** for a fast, low-cost pre-screening. If flagged as **High Risk**, it invokes **Claude Sonnet** for deep context gathering (e.g., cross-referencing IPs, validating billing/shipping mismatches).
 4. The agent pushes an interactive Block Kit card via the Slack API to the store manager. This card details the AI's fraud analysis and provides explicit [ Approve Order ] or [ Reject & Cancel ] action triggers.
 5. The active execution state freezes immediately; the thread safely stores its state machine details inside **ElastiCache Serverless** and terminates the active thread to save compute resources.
-6. A manager confirms or rejects the prompt inside the Slack interface. This passes a validation webhook response to **AWS API Gateway** and into the **SQS** queue. FastAPI polls this queue, forwards the webhook callback to Odoo via JSON-RPC, and Odoo passes the decision back to FastAPI to pull the thread out of ElastiCache and seamlessly resume the workflow to execute the final decision (e.g., canceling the order in Shopify and syncing the status to Odoo).
+6. A manager confirms or rejects the prompt inside the Slack interface. This passes a validation webhook response to **AWS API Gateway** and into the **SQS** queue. FastAPI polls this queue, seamlessly resumes the workflow from ElastiCache, and returns the final decision to Odoo via JSON-RPC. Odoo then executes the final decision (e.g., canceling the order in Shopify via the Shopify API and syncing the status).

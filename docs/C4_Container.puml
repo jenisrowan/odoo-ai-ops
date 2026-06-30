@@ -20,14 +20,14 @@ System_Boundary(aws, "AWS Cloud") {
     System_Boundary(vpc, "VPC (10.0.0.0/16)") {
 
         Container(alb, "Application Load Balancer", "AWS ALB", "Routes standard web traffic")
-        Container(nat, "Regional NAT Gateways", "AWS NAT GW", "Egress for external API calls only (Anthropic, Shopify, Slack)")
+        Container(nat, "Regional NAT Gateway", "AWS NAT GW", "Egress for external API calls (Anthropic, Shopify, Slack)")
         Container(s3_endpoint, "S3 VPC Endpoint", "Gateway Endpoint", "Free S3 Gateway endpoint for private routing")
         Container(sqs_endpoint, "SQS VPC Endpoint", "Interface Endpoint (PrivateLink)", "Enables private SQS access via ENIs")
 
         System_Boundary(private_ecs, "Private Subnets (ECS Clusters)") {
 
             Container(pgbouncer, "PgBouncer Cluster", "ECS on EC2", "Database connection pooler")
-            Container(agent, "FastAPI Agent Cluster", "ECS on EC2", "Hosts FastAPI LangGraph Agent. Polls SQS queue.")
+            Container(agent, "FastAPI Agent Service", "ECS on EC2", "Hosts FastAPI LangGraph Agent. Polls SQS queue.")
             Container(nginx, "Nginx Sidecar", "Docker Container", "Reverse proxy for Odoo")
             Container(odoo, "Odoo 19 Service", "ECS on EC2", "Core ERP. Evaluates forwarded webhook risk and gates AI tasks.")
             
@@ -102,7 +102,8 @@ Rel(s3_endpoint, s3, "Routes S3 traffic privately", "AWS Internal")
 
 Rel(agent, sqs_endpoint, "Polls pending webhooks", "SQS API")
 Rel(sqs_endpoint, sqs, "Routes SQS traffic privately", "AWS Internal")
-Rel(agent, nat, "Shopify GraphQL, Anthropic & Slack REST", "HTTPS")
+Rel(agent, nat, "Anthropic & Slack REST", "HTTPS")
+Rel(odoo, nat, "Shopify GraphQL & REST", "HTTPS")
 Rel(nat, external_apis, "Egress traffic to external services", "HTTPS")
 
 @enduml

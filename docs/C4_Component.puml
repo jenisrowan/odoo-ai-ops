@@ -12,12 +12,14 @@ Container(alb, "Application Load Balancer", "AWS ALB", "Entry point for normal w
 Container(nginx, "Nginx Sidecar", "Docker Container", "Reverse proxy to Odoo")
 Container(odoo, "Odoo 19 Service", "ECS EC2", "ERP core service & AI Gatekeeper")
 Container(langfuse, "Langfuse Server", "ECS Fargate Spot", "Telemetry aggregation")
+ContainerDb(clickhouse, "ClickHouse Analytical", "Hybrid OLAP", "Stores trace metrics")
 ContainerDb(rds, "RDS PostgreSQL", "Multi-AZ", "Core database")
 ContainerDb(langfuse_rds, "Langfuse RDS", "PostgreSQL", "Dedicated DB for Langfuse")
 ContainerDb(efs, "Amazon EFS", "AWS", "Shared file system for Odoo")
 ContainerDb(valkey, "ElastiCache Serverless", "Valkey", "Managed state cache and telemetry buffer")
+ContainerDb(s3, "Amazon S3", "S3 Bucket", "Cold storage for aged traces")
 
-System_Boundary(fastapi_cluster, "FastAPI Agent Cluster") {
+System_Boundary(fastapi_cluster, "FastAPI Agent Service") {
     Component(fastapi, "FastAPI & LangGraph Agent", "Python / Docker", "Executes workflows only when triggered by Odoo gatekeeper.")
 }
 
@@ -27,27 +29,31 @@ System_Boundary(pgbouncer_cluster, "PgBouncer Cluster") {
 
 Rel(apigw, lambda_auth, "Authorizes request", "Sync")
 Rel(apigw, sqs, "Enqueues incoming webhooks", "HTTPS")
-Rel(sqs, fastapi, "Workers poll and delete processed webhooks", "Boto3")
+Rel(fastapi, sqs, "Workers poll and delete processed webhooks", "Boto3")
 Rel(alb, nginx, "Routes standard user traffic", "HTTP")
 Rel(nginx, odoo, "Reverse proxies to", "HTTP")
 
-Rel(odoo, fastapi, "Pushes/Initiates AI task for high-risk orders", "JSON/REST")
+Rel_L(odoo, fastapi, "Pushes/Initiates AI task for high-risk orders", "REST")
 Rel(odoo, pgbouncer, "Service Connect (pgbouncer.odoo.local)", "TCP")
 Rel(odoo, efs, "Reads/Writes web filestores (attachments)", "NFS")
 Rel(odoo, valkey, "Stores session data", "rediss")
 
 Rel(fastapi, valkey, "Writes graph state & buffers telemetry", "Redis/TCP")
 Rel(valkey, fastapi, "Returns state & queued telemetry for flushing", "Redis/TCP")
-Rel(fastapi, odoo, "JSON-RPC API calls & webhook forwarding", "HTTP via ECS Service Connect")
+Rel_R(fastapi, odoo, "JSON-RPC API calls & webhook forwarding", "HTTP via ECS Service Connect")
 Rel(pgbouncer, rds, "Multiplexed DB connections", "PostgreSQL Wire Protocol")
 
 Rel(fastapi, langfuse, "Background worker flushes buffered telemetry", "HTTP")
+Rel(langfuse, clickhouse, "Writes trace metric data", "TCP")
+Rel(clickhouse, s3, "Offloads older data partitions", "S3 API")
 Rel(langfuse, langfuse_rds, "Reads/Writes configuration", "TCP/PostgreSQL")
 
 System_Ext(anthropic, "Anthropic Claude")
 System_Ext(slack, "Slack API")
+System_Ext(shopify, "Shopify API")
 Rel(fastapi, anthropic, "Requests AI analysis", "HTTPS")
 Rel(fastapi, slack, "Pushes Block Kit cards for approval", "HTTPS")
 Rel(slack, apigw, "Sends interactive validation callbacks", "HTTPS")
+Rel(odoo, shopify, "Rejects/cancels orders & fetches logs", "GraphQL")
 
 @enduml
