@@ -1,0 +1,38 @@
+[
+  {
+    "name": "clickhouse",
+    "image": "${clickhouse_image_url}",
+    "cpu": 3584,
+    "memory": 30720,
+    "stopTimeout": 120,
+    "essential": true,
+    "ulimits": [
+      { "name": "nofile", "softLimit": 262144, "hardLimit": 262144 }
+    ],
+    "portMappings": [
+      { "name": "clickhouse-http", "containerPort": 8123, "hostPort": 8123, "protocol": "tcp" },
+      { "name": "clickhouse-native", "containerPort": 9000, "hostPort": 9000, "protocol": "tcp" }
+    ],
+    "environment": [
+      { "name": "CLICKHOUSE_DB", "value": "default" },
+      { "name": "CLICKHOUSE_USER", "value": "langfuse" },
+      { "name": "CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT", "value": "1" },
+      { "name": "CLICKHOUSE_S3_ENDPOINT", "value": "${s3_cold_endpoint}" },
+      { "name": "CLICKHOUSE_S3_REGION", "value": "${aws_region}" }
+    ],
+    "secrets": [
+      { "name": "CLICKHOUSE_PASSWORD", "valueFrom": "${telemetry_secret_arn}:clickhouse_password::" }
+    ],
+    "mountPoints": [
+      { "sourceVolume": "clickhouse-data", "containerPath": "/var/lib/clickhouse" }
+    ],
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "/ecs/clickhouse",
+        "awslogs-region": "${aws_region}",
+        "awslogs-stream-prefix": "clickhouse"
+      }
+    }
+  }
+]

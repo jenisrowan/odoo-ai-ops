@@ -14,7 +14,7 @@ System_Boundary(aws, "AWS Cloud") {
 
     Container(edge, "Edge Security & Cache", "AWS WAF + CloudFront", "Provides Global Edge Cache, Bot Control, and Rate Limiting")
     Container(apigw, "API Gateway", "AWS API Gateway", "Ingests webhooks reliably")
-    Container(lambda, "Lambda Authorizer", "AWS Lambda", "Verifies signatures & Slack challenges synchronously")
+    Container(lambda, "Webhook Verify+Ingest Lambda", "AWS Lambda", "Proxy integration: verifies HMAC, answers Slack challenge synchronously, and enqueues verified payloads to SQS")
     ContainerQueue(sqs, "Webhook Queue", "Amazon SQS", "Buffers incoming webhooks for processing")
 
     System_Boundary(vpc, "VPC (10.0.0.0/16)") {
@@ -62,8 +62,8 @@ Rel(edge, apigw, "Routes external webhooks")
 ' Webhook Processing
 '====================================================
 
-Rel(apigw, lambda, "Verifies auth & challenge", "Sync")
-Rel(apigw, sqs, "Drops verified webhooks into queue")
+Rel(apigw, lambda, "Proxy integration (verify + challenge)", "Sync")
+Rel(lambda, sqs, "Enqueues verified webhooks", "SendMessage")
 
 '====================================================
 ' Application Flow

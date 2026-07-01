@@ -1,0 +1,74 @@
+[
+  {
+    "name": "langfuse-web",
+    "image": "${langfuse_web_image_url}",
+    "cpu": 512,
+    "essential": true,
+    "portMappings": [
+      { "name": "langfuse", "containerPort": 3000, "hostPort": 3000, "protocol": "tcp" }
+    ],
+    "environment": [
+      { "name": "NEXTAUTH_URL", "value": "http://langfuse:3000" },
+      { "name": "HOSTNAME", "value": "0.0.0.0" },
+      { "name": "TELEMETRY_ENABLED", "value": "false" },
+      { "name": "LANGFUSE_INIT_ORG_ID", "value": "odoo-ai-ops" },
+      { "name": "LANGFUSE_INIT_PROJECT_ID", "value": "odoo-ai-ops" },
+      { "name": "CLICKHOUSE_URL", "value": "http://clickhouse:8123" },
+      { "name": "CLICKHOUSE_MIGRATION_URL", "value": "clickhouse://clickhouse:9000" },
+      { "name": "CLICKHOUSE_USER", "value": "langfuse" },
+      { "name": "REDIS_CONNECTION_STRING", "value": "${redis_connection_string}" },
+      { "name": "LANGFUSE_S3_EVENT_UPLOAD_ENABLED", "value": "true" },
+      { "name": "LANGFUSE_S3_EVENT_UPLOAD_BUCKET", "value": "${events_bucket}" },
+      { "name": "LANGFUSE_S3_EVENT_UPLOAD_REGION", "value": "${aws_region}" },
+      { "name": "LANGFUSE_S3_MEDIA_UPLOAD_ENABLED", "value": "true" },
+      { "name": "LANGFUSE_S3_MEDIA_UPLOAD_BUCKET", "value": "${events_bucket}" },
+      { "name": "LANGFUSE_S3_MEDIA_UPLOAD_REGION", "value": "${aws_region}" }
+    ],
+    "secrets": [
+      { "name": "DATABASE_URL", "valueFrom": "${telemetry_secret_arn}:database_url::" },
+      { "name": "CLICKHOUSE_PASSWORD", "valueFrom": "${telemetry_secret_arn}:clickhouse_password::" },
+      { "name": "NEXTAUTH_SECRET", "valueFrom": "${telemetry_secret_arn}:nextauth_secret::" },
+      { "name": "SALT", "valueFrom": "${telemetry_secret_arn}:salt::" },
+      { "name": "ENCRYPTION_KEY", "valueFrom": "${telemetry_secret_arn}:encryption_key::" },
+      { "name": "LANGFUSE_INIT_PROJECT_PUBLIC_KEY", "valueFrom": "${integration_secret_arn}:langfuse_public_key::" },
+      { "name": "LANGFUSE_INIT_PROJECT_SECRET_KEY", "valueFrom": "${integration_secret_arn}:langfuse_secret_key::" }
+    ],
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "/ecs/langfuse",
+        "awslogs-region": "${aws_region}",
+        "awslogs-stream-prefix": "web"
+      }
+    }
+  },
+  {
+    "name": "langfuse-worker",
+    "image": "${langfuse_worker_image_url}",
+    "cpu": 512,
+    "essential": true,
+    "environment": [
+      { "name": "CLICKHOUSE_URL", "value": "http://clickhouse:8123" },
+      { "name": "CLICKHOUSE_MIGRATION_URL", "value": "clickhouse://clickhouse:9000" },
+      { "name": "CLICKHOUSE_USER", "value": "langfuse" },
+      { "name": "REDIS_CONNECTION_STRING", "value": "${redis_connection_string}" },
+      { "name": "LANGFUSE_S3_EVENT_UPLOAD_ENABLED", "value": "true" },
+      { "name": "LANGFUSE_S3_EVENT_UPLOAD_BUCKET", "value": "${events_bucket}" },
+      { "name": "LANGFUSE_S3_EVENT_UPLOAD_REGION", "value": "${aws_region}" }
+    ],
+    "secrets": [
+      { "name": "DATABASE_URL", "valueFrom": "${telemetry_secret_arn}:database_url::" },
+      { "name": "CLICKHOUSE_PASSWORD", "valueFrom": "${telemetry_secret_arn}:clickhouse_password::" },
+      { "name": "SALT", "valueFrom": "${telemetry_secret_arn}:salt::" },
+      { "name": "ENCRYPTION_KEY", "valueFrom": "${telemetry_secret_arn}:encryption_key::" }
+    ],
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "/ecs/langfuse",
+        "awslogs-region": "${aws_region}",
+        "awslogs-stream-prefix": "worker"
+      }
+    }
+  }
+]

@@ -1,3 +1,12 @@
+# Local development stack mirroring the ECS topology:
+#   nginx (sidecar) shared netns -> odoo -> pgbouncer-less direct db
+#   agent (FastAPI) -> odoo (JSON-RPC) + redis (Valkey stand-in)
+#
+# The Nginx container uses `network_mode: service:web` so it shares the Odoo
+# container's network namespace exactly like an ECS awsvpc sidecar. That makes
+# the baked-in nginx.conf upstream `127.0.0.1:8069` resolve to Odoo locally, so
+# the same proxy config runs in dev and prod. Because nginx shares web's
+# namespace, all published ports are declared on the `web` service.
 services:
   web:
     build:
@@ -6,16 +15,33 @@ services:
     depends_on:
       - db
       - redis
+    expose:
+      - "8069"
+      - "8072"
     ports:
-      - "8069:8069"
+      - "80:80"       # public entrypoint, served by the nginx sidecar
+      - "8069:8069"   # direct Odoo access for debugging
     volumes:
       - odoo-data:/var/lib/odoo
       - ./dev.conf:/etc/odoo/odoo.conf
+      - ./custom_addons:/mnt/extra-addons   # mount the odoo_ai_ops module
     environment:
       - ODOO_STAGE=dev
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_URL=redis://redis:6379
+
+  # Nginx reverse-proxy sidecar (same network namespace as `web`).
+  nginx:
+    build:
+      context: .
+      dockerfile: templates/Dockerfile.nginx
+    depends_on:
+      - web
+    network_mode: "service:web"
+    volumes:
+      # Live-mount the proxy config for local editing (image bakes the same file).
+      - ./templates/nginx.conf:/etc/nginx/nginx.conf:ro
 
   db:
     image: postgres:16
@@ -26,10 +52,36 @@ services:
     volumes:
       - db-data:/var/lib/postgresql/data
 
+  # Valkey-compatible cache (LangGraph checkpoints + Odoo sessions locally).
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+
+  # FastAPI + LangGraph agent. SQS polling is disabled locally (no AWS); use the
+  # REST endpoints directly. Provide ANTHROPIC_API_KEY in your shell to exercise
+  # the LLM workflows.
+  agent:
+    build:
+      context: .
+      dockerfile: templates/Dockerfile.fastapi
+    depends_on:
+      - web
+      - redis
+    ports:
+      - "8000:8000"
+    environment:
+      - LOG_LEVEL=INFO
+      - ENABLE_SQS_WORKER=false
+      - VALKEY_URL=redis://redis:6379
+      - ODOO_BASE_URL=http://web:8069
+      - ODOO_DB=odoo
+      - ODOO_USERNAME=admin
+      - ODOO_PASSWORD=admin
+      - AI_OPS_SHARED_TOKEN=dev-shared-token
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - MODEL_MEDIUM=claude-haiku-4-5-20251001
+      - MODEL_HIGH=claude-sonnet-5
 
 volumes:
   odoo-data:

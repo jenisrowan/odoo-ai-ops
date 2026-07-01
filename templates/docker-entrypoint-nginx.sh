@@ -7,15 +7,15 @@
 # rather than an immediate (SIGKILL) stop.
 #
 # ECS Task Stopping Lifecycle (service-managed tasks):
-#   DEACTIVATING — ECS tells the ALB to deregister this task and waits for
+#   DEACTIVATING - ECS tells the ALB to deregister this task and waits for
 #                  the full deregistration_delay (60 s) to elapse. No new
 #                  connections are routed to us during or after this phase.
-#   STOPPING     — ECS then sends SIGTERM to all containers simultaneously.
+#   STOPPING     - ECS then sends SIGTERM to all containers simultaneously.
 #                  By this point the ALB has already finished draining, so
 #                  it is safe to issue 'nginx -s quit' immediately.
 #
 # Shutdown sequence on SIGTERM:
-#   1. 'nginx -s quit' — Nginx finishes any remaining keep-alive connections
+#   1. 'nginx -s quit' - Nginx finishes any remaining keep-alive connections
 #      that are still open (should be near zero after ALB draining) then exits.
 #   2. Wait for nginx to exit cleanly.
 #
@@ -31,15 +31,15 @@ set -eu
 NGINX_PID=""
 
 _graceful_shutdown() {
-    echo "[nginx-entrypoint] SIGTERM received — issuing graceful drain (nginx -s quit)."
+    echo "[nginx-entrypoint] SIGTERM received - issuing graceful drain (nginx -s quit)."
 
     if [ -z "$NGINX_PID" ]; then
-        echo "[nginx-entrypoint] Nginx not yet started — exiting immediately."
+        echo "[nginx-entrypoint] Nginx not yet started - exiting immediately."
         exit 0
     fi
 
     # 'nginx -s quit' sends SIGQUIT to the master, which:
-    #   - Stops accepting new connections (health check will fail → ALB drains)
+    #   - Stops accepting new connections (health check will fail -> ALB drains)
     #   - Waits for existing connections to close before workers exit
     nginx -s quit 2>/dev/null || true
 

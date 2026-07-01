@@ -12,7 +12,7 @@
  [ Internet Gateway ] <------------------------------------------------------------------------- [ VPC ]  [ AWS API Gateway ]
               |                                                                                (10.0/16)        |
               |                                                                                                 ▼
-              |                                                                                       [ Lambda Authorizer ]
+              |                                                                                 [ Webhook Verify+Ingest Lambda ]
               |                                                                                                 |
               |                                                                                                 ▼
               |                                                                                          [ Amazon SQS ]
@@ -81,7 +81,7 @@
 * [ EFS Mount Target ] are two mount targets of one shared EFS file system (aws_efs_file_system.odoo).
 * [ RDS Postgres ] is a db.m6g.xlarge instance with multi_az=true; AWS manages the standby replica automatically.
 
-* **[ Webhook Ingestion ]** Webhooks are routed by CloudFront to **AWS API Gateway**, which uses a **Lambda Authorizer** to verify HMAC signatures and handle synchronous challenge verifications, then drops verified payloads into an **Amazon SQS** queue.
+* **[ Webhook Ingestion ]** Webhooks are routed by CloudFront to **AWS API Gateway**, which invokes a **Lambda proxy integration** (the Webhook Verify+Ingest Lambda). That single Lambda verifies the HMAC signature, answers Slack's synchronous URL-verification challenge, and only on success, enqueues the normalized payload (`{source, topic, payload}`) into **Amazon SQS**. Fusing verification and enqueue in one proxy Lambda is required because an HTTP API Lambda *authorizer* cannot emit the Slack challenge response body; it guarantees no unverified message ever reaches the queue.
 * **[ Load Balancer Routing ]** The Application Load Balancer routes standard backend web requests to the **Nginx** sidecar container, which reverse proxies to the **Odoo 19** container within the same task.
 * **[ Odoo 19 Service ]** Deployed using the Odoo 19 community Docker image via native **ECS on EC2 (`c6g.xlarge` nodes)**, alongside an **Nginx sidecar**. It receives forwarded webhook payloads from the FastAPI agent via JSON-RPC, evaluates risk, gates AI tasks, binds directly to localized mount points referencing shared Amazon EFS file system for web filestores, and routes database traffic directly through the PgBouncer cluster discovery configuration. Valkey is used to store session data.
 * **PgBouncer:** Runs on **ECS EC2 (`m6g.medium`)** nodes to handle dedicated lightweight database connection pooling.
@@ -115,7 +115,7 @@
 
 **Path 2: Fraud Detection (Autonomous Loop)**
 
-1. A production order is flagged by Shopify's OrderRisk system, triggering a webhook payload to **AWS API Gateway**, where the **Lambda Authorizer** verifies the HMAC signature before dropping it into the **Amazon SQS** queue.
+1. A production order is flagged by Shopify's OrderRisk system, triggering a webhook payload to **AWS API Gateway**, which invokes the **Webhook Verify+Ingest Lambda** (proxy integration). The Lambda verifies the HMAC signature and, on success, enqueues it into the **Amazon SQS** queue.
 2. **FastAPI SQS workers** poll the SQS queue privately via the VPC Interface Endpoint, retrieve the webhook payload, and forward it to **Odoo** via a private JSON-RPC call. Odoo workers receive the payload and evaluate it. If the order is very cheap (< $10) and marked with medium or high risk, Odoo automatically rejects/cancels the order in Shopify directly (without wasting AI compute). Otherwise, Odoo initiates an AI task back to the **FastAPI + LangGraph container** via a REST API call.
 3. The task initiates inside a LangGraph execution thread. If Shopify flagged the order as **Medium Risk**, the agent invokes **Claude Haiku** for a fast, low-cost pre-screening. If flagged as **High Risk**, it invokes **Claude Sonnet** for deep context gathering (e.g., cross-referencing IPs, validating billing/shipping mismatches).
 4. The agent pushes an interactive Block Kit card via the Slack API to the store manager. This card details the AI's fraud analysis and provides explicit [ Approve Order ] or [ Reject & Cancel ] action triggers.

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="0">
+
+        <!-- Application category shown in the Settings > Users group selector.
+             In Odoo 19 the category is attached to groups through a
+             res.groups.privilege (groups themselves no longer carry
+             category_id). -->
+        <record id="module_category_ai_ops" model="ir.module.category">
+            <field name="name">AI Ops</field>
+            <field name="description">Access rights for the AI Ops fraud &amp; reconciliation suite.</field>
+            <field name="sequence">90</field>
+        </record>
+
+        <record id="privilege_ai_ops" model="res.groups.privilege">
+            <field name="name">AI Ops</field>
+            <field name="category_id" ref="module_category_ai_ops"/>
+        </record>
+
+        <!-- Operational user: can see tasks and act on approvals -->
+        <record id="group_ai_ops_user" model="res.groups">
+            <field name="name">AI Ops User</field>
+            <field name="privilege_id" ref="privilege_ai_ops"/>
+            <field name="implied_ids" eval="[(4, ref('base.group_user'))]"/>
+        </record>
+
+        <!-- Manager: full control, configuration access -->
+        <record id="group_ai_ops_manager" model="res.groups">
+            <field name="name">AI Ops Manager</field>
+            <field name="privilege_id" ref="privilege_ai_ops"/>
+            <field name="implied_ids" eval="[(4, ref('group_ai_ops_user'))]"/>
+            <field name="user_ids" eval="[(4, ref('base.user_admin'))]"/>
+        </record>
+
+        <!-- Technical group for the FastAPI agent's integration user. Implies the
+             stock manager role so the agent can read moves and apply inventory
+             adjustment patches via JSON-RPC. -->
+        <record id="group_ai_ops_agent" model="res.groups">
+            <field name="name">AI Ops Agent (Technical)</field>
+            <field name="privilege_id" ref="privilege_ai_ops"/>
+            <field name="implied_ids" eval="[(4, ref('group_ai_ops_user')), (4, ref('stock.group_stock_manager'))]"/>
+        </record>
+
+        <!-- Multi-company isolation for AI Ops tasks -->
+        <record id="ai_ops_task_company_rule" model="ir.rule">
+            <field name="name">AI Ops Task: multi-company</field>
+            <field name="model_id" ref="model_ai_ops_task"/>
+            <field name="global" eval="True"/>
+            <field name="domain_force">['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]</field>
+        </record>
+
+    </data>
+</odoo>

@@ -1,0 +1,11 @@
+# Ruff config for the Odoo module. Odoo conventions differ from the agent:
+# longer lines are common and __init__.py files legitimately re-export imports.
+line-length = 120
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "I", "W"]
+
+[lint.per-file-ignores]
+"__init__.py" = ["F401"]
+"tests/__init__.py" = ["F401"]

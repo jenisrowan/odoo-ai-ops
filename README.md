@@ -31,7 +31,7 @@ The infrastructure is deployed inside a multi-AZ AWS VPC.
        [ AWS ALB ]                        [ AWS API Gateway ]
              │                                  │
              ▼                                  ▼
-      [ Nginx Sidecar ]                 [ Lambda Authorizer ]
+      [ Nginx Sidecar ]                [ Verify+Ingest Lambda ]
              │                                  │
              ▼                                  ▼
      [ Odoo 19 Service ]                  [ Amazon SQS ]
@@ -67,7 +67,7 @@ The infrastructure is deployed inside a multi-AZ AWS VPC.
 
 ### 1. Autonomous Fraud Detection (Shopify & Slack Integration)
 
-1. **Ingestion:** Shopify's `OrderRisk` webhook sends a payload to AWS API Gateway. A **Lambda Authorizer** validates the HMAC signature synchronously and writes it to **Amazon SQS**.
+1. **Ingestion:** Shopify's `OrderRisk` webhook sends a payload to AWS API Gateway, which invokes a **Lambda proxy integration** that validates the HMAC signature (and answers Slack's challenge) synchronously and, on success, writes the verified payload to **Amazon SQS**.
 2. **Evaluation:** Odoo workers poll the SQS queue. If the flagged order is very cheap (< $10) and marked with medium or high risk, the system automatically rejects it directly in Shopify (via API). Otherwise, it triggers a LangGraph agent run via REST API.
 3. **Execution & Risk-Triage:**
 * *Medium Risk:* Agent uses **Claude Haiku** for fast, low-cost screening.
@@ -122,19 +122,44 @@ To reduce configuration complexity and minimize costs, this project utilizes a *
 
 ### Deployment
 
-1. **Setup AWS Secrets**: Before deploying, manually create a secret in AWS Secrets Manager for the Odoo Master Password:
-* Choose **Other type of secret**.
-* Add a Key/Value pair: Key = `password`, Value = `[Your_Secure_Master_Password]`.
-* Name the secret: `odoo/admin/password`.
+1. **Setup AWS Secrets**: Before deploying, manually create two secrets in AWS Secrets Manager:
 
+   a. **Odoo master password** - `odoo/admin/password`, *Other type of secret*, key `password` = your master password.
 
-2. **Initialize and Apply Terraform**:
-```bash
-cd terraform
-terraform init
-terraform apply
+   b. **Integration credentials** - `odoo/integration/credentials`, *Other type of secret*, a JSON
+   document with these keys (consumed by the Odoo, FastAPI, and Lambda tasks):
 
-```
+   ```json
+   {
+     "ai_ops_shared_token": "...",
+     "shopify_admin_token": "...",
+     "shopify_shop_domain": "my-store.myshopify.com",
+     "shopify_webhook_secret": "...",
+     "slack_bot_token": "...",
+     "slack_signing_secret": "...",
+     "anthropic_api_key": "...",
+     "odoo_agent_password": "...",
+     "langfuse_public_key": "...",
+     "langfuse_secret_key": "..."
+   }
+   ```
+
+2. **Initialize and Apply Terraform** (or run the `Build & Deploy` GitHub Action, which builds and
+   pushes all three images then applies):
+   ```bash
+   cd terraform
+   terraform init
+   terraform apply
+   ```
+
+3. **Create the agent's Odoo user**: after first boot, create an Odoo user with login
+   `ai_ops_agent` (see `odoo_agent_username` var), set its password to `odoo_agent_password`, and
+   grant it the **AI Ops Agent (Technical)** group. The FastAPI agent authenticates as this user
+   over JSON-RPC.
+
+4. **Point the webhooks at API Gateway**: configure Shopify (`orders/risk`) and Slack
+   (interactivity + events) to POST to the `api_gateway_webhook_url` output
+   (`/webhooks/shopify` and `/webhooks/slack`).
 
 
 
@@ -144,19 +169,26 @@ After deployment, Terraform will output:
 
 * `cloudfront_url`: The primary public URL for your Odoo instance.
 * `alb_url`: Internal load balancer URL.
-* `odoo_ecr_url` / `nginx_ecr_url`: Target repositories for your Docker images.
+* `odoo_ecr_url` / `nginx_ecr_url` / `fastapi_ecr_url`: Target ECR repositories for your images.
+* `api_gateway_webhook_url`: Public webhook ingress (append `/webhooks/shopify` or `/webhooks/slack`).
+* `webhook_queue_url`: SQS queue the agent polls privately via PrivateLink.
 
 ---
 
 ## 📂 Repository Layout
 
 ```
-├── .github/workflows/   # CI/CD pipelines for deployment and teardown
+├── .github/workflows/   # CI/CD pipelines (ci.yml, aws.yml build+deploy, destroy.yml)
+├── agent/               # FastAPI + LangGraph agent service (app/, tests/)
+├── custom_addons/
+│   └── odoo_ai_ops/     # Custom Odoo 19 module (gatekeeper, JSON-RPC API, approvals)
+├── lambda/
+│   └── webhook_authorizer/  # API Gateway Lambda (HMAC verify + Slack challenge + SQS)
 ├── docs/                # Architecture diagrams (PlantUML) and deep-dive notes
-├── templates/           # Dockerfiles, entrypoint scripts, and ECS task definitions
-├── terraform/           # Infrastructure as Code (AWS ECS, RDS, Valkey, Networking)
+├── templates/           # Dockerfiles (odoo, nginx, fastapi), entrypoints, ECS task defs
+├── terraform/           # Infrastructure as Code (ECS, RDS, Valkey, SQS, API GW, Lambda)
 ├── CHANGELOG.md         # Version history and release notes
 ├── cost_analysis.txt    # AWS monthly cost projections and tiers
-├── docker-compose.yml   # Local development environment setup
+├── docker-compose.yml   # Local development environment (nginx sidecar + agent)
 └── README.md            # Project documentation (this file)
 ```

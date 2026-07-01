@@ -38,4 +38,5 @@ jobs:
       run: |
         terraform destroy -auto-approve \
           -var="odoo_image_url=dummy" \
-          -var="nginx_image_url=dummy"
+          -var="nginx_image_url=dummy" \
+          -var="fastapi_image_url=dummy"

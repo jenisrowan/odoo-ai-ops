@@ -1,5 +1,5 @@
 ================================================================================
-                     MONTHLY COST ANALYSIS — AWS INFRASTRUCTURE
+                     MONTHLY COST ANALYSIS - AWS INFRASTRUCTURE
                      Odoo AI Ops (us-east-1 Region Pricing)
 ================================================================================
 
@@ -35,7 +35,7 @@ Assumptions:
 |   FastAPI Agent                     | m6g.large        | 1     |   $56.06  |
 |   ClickHouse Analytical Node        | r6g.xlarge       | 1     |  $147.17  |
 |   Langfuse Server (Fargate Spot)    | 1 vCPU/2GB       | 1     |   $11.00  |
-|   Lambda Authorizer                 | 128MB ARM        | —     |    $0.20  |
+|   Webhook Ingest Lambda             | 128MB ARM        | -     |    $0.20  |
 +-------------------------------------+------------------+-------+-----------+
 | SUBTOTAL COMPUTE                    |                  |       |  $311.14  |
 +-------------------------------------+------------------+-------+-----------+
@@ -66,9 +66,9 @@ Assumptions:
 |                                     |                  |       |           |
 | NETWORKING                          |                  |       |           |
 |   NAT Gateway                       | Automatic        | 1     |   $32.85  |
-|   Application Load Balancer (fixed) | —                | 1     |   $16.43  |
-|   CloudFront Distribution           | —                | 1     |    $1.00  |
-|   AWS WAF (Web ACL + 5 Rules)       | —                | 1     |   $18.00  |
+|   Application Load Balancer (fixed) | -                | 1     |   $16.43  |
+|   CloudFront Distribution           | -                | 1     |    $1.00  |
+|   AWS WAF (Web ACL + 5 Rules)       | -                | 1     |   $18.00  |
 |   VPC Endpoint: S3 (Gateway)        | Free             | 1     |    $0.00  |
 |   VPC Endpoint: SQS (Interface)     | $0.01/hr per AZ  | 2 AZs |   $14.60  |
 +-------------------------------------+------------------+-------+-----------+
@@ -121,10 +121,10 @@ Assumptions:
 Assumptions per flagged order:
   • 1 SQS message received + 1 SQS delete = 2 SQS requests
   • 1 API Gateway invocation (webhook ingestion)
-  • 1 Lambda Authorizer invocation
-  • 1 Shopify GraphQL call (~20 KB response) → via NAT
-  • 1 Claude invocation (~2K in / ~1K out, 70% Haiku 4.5 / 30% Sonnet 4.6) → via NAT
-  • 1 Slack Block Kit push + 1 Slack approval callback → via NAT
+  • 1 Webhook Ingest Lambda invocation
+  • 1 Shopify GraphQL call (~20 KB response) -> via NAT
+  • 1 Claude invocation (~2K in / ~1K out, 70% Haiku 4.5 / 30% Sonnet 4.6) -> via NAT
+  • 1 Slack Block Kit push + 1 Slack approval callback -> via NAT
   • SQS traffic (~5 KB/order) routes via SQS Interface Endpoint
   • ~20 ElastiCache Serverless commands (state machine reads/writes)
 

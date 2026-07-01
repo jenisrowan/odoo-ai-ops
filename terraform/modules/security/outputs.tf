@@ -1,0 +1,12 @@
+output "alb_http_sg_id" { value = aws_security_group.alb_http_sg.id }
+output "alb_https_sg_id" { value = aws_security_group.alb_https_sg.id }
+output "ecs_node_sg_id" { value = aws_security_group.ecs_node_sg.id }
+output "ecs_task_sg_id" { value = aws_security_group.ecs_task_sg.id }
+output "fastapi_sg_id" { value = aws_security_group.fastapi_sg.id }
+output "rds_sg_id" { value = aws_security_group.rds_sg.id }
+output "efs_sg_id" { value = aws_security_group.efs_sg.id }
+output "pgbouncer_sg_id" { value = aws_security_group.pgbouncer_sg.id }
+output "valkey_sg_id" { value = aws_security_group.valkey_sg.id }
+output "langfuse_sg_id" { value = aws_security_group.langfuse_sg.id }
+output "clickhouse_sg_id" { value = aws_security_group.clickhouse_sg.id }
+output "langfuse_rds_sg_id" { value = aws_security_group.langfuse_rds_sg.id }

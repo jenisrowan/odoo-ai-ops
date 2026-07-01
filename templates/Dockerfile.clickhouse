@@ -1,0 +1,11 @@
+# =============================================================================
+# ClickHouse analytical node with S3 tiered-storage config baked in.
+# Build context is the repository root:
+#   docker build -f templates/Dockerfile.clickhouse -t clickhouse .
+# Multi-arch base (arm64 for the r6g.xlarge Graviton node).
+# =============================================================================
+FROM clickhouse/clickhouse-server:24.8
+
+# Tiered storage policy (hot = local io2 EBS, cold = S3). Endpoint/region are
+# supplied at runtime via CLICKHOUSE_S3_ENDPOINT / CLICKHOUSE_S3_REGION.
+COPY templates/clickhouse/storage.xml /etc/clickhouse-server/config.d/storage.xml

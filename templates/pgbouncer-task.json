@@ -2,7 +2,7 @@
   {
     "name": "pgbouncer",
     "image": "edoburu/pgbouncer:v1.25.1-p0",
-    "cpu": 1280,
+    "cpu": 768,
     "memory": 512,
     "essential": true,
     "environment": [

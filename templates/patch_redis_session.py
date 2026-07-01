@@ -3,9 +3,9 @@
 Patch mangono-odoo-redis-session for Odoo 19 compatibility.
 
 Odoo 19 removed/changed several internal APIs that this module relies on:
-  1. `odoo.conf` → removed; use `odoo.tools.config` instead
-  2. `odoo.tools.func.lazy_property` → deprecated; use `functools.cached_property`
-  3. `odoo.tools.config.misc` → removed; use `getattr` with fallback
+  1. `odoo.conf` -> removed; use `odoo.tools.config` instead
+  2. `odoo.tools.func.lazy_property` -> deprecated; use `functools.cached_property`
+  3. `odoo.tools.config.misc` -> removed; use `getattr` with fallback
 """
 import re
 import pathlib

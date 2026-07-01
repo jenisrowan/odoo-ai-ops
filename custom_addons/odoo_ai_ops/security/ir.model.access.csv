@@ -1,0 +1,4 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_ai_ops_task_user,ai.ops.task.user,model_ai_ops_task,group_ai_ops_user,1,1,1,0
+access_ai_ops_task_agent,ai.ops.task.agent,model_ai_ops_task,group_ai_ops_agent,1,1,1,0
+access_ai_ops_task_manager,ai.ops.task.manager,model_ai_ops_task,group_ai_ops_manager,1,1,1,1

@@ -1,0 +1,49 @@
+[
+  {
+    "name": "fastapi",
+    "image": "${fastapi_image_url}",
+    "cpu": 1664,
+    "memory": 6656,
+    "stopTimeout": 120,
+    "essential": true,
+    "portMappings": [
+      {
+        "name": "fastapi",
+        "containerPort": 8000,
+        "hostPort": 8000,
+        "protocol": "tcp"
+      }
+    ],
+    "environment": [
+      { "name": "LOG_LEVEL", "value": "INFO" },
+      { "name": "ENABLE_SQS_WORKER", "value": "true" },
+      { "name": "AWS_REGION", "value": "${aws_region}" },
+      { "name": "SQS_QUEUE_URL", "value": "${sqs_queue_url}" },
+      { "name": "VALKEY_URL", "value": "${valkey_url}" },
+      { "name": "ODOO_BASE_URL", "value": "${odoo_base_url}" },
+      { "name": "ODOO_DB", "value": "${odoo_db}" },
+      { "name": "ODOO_USERNAME", "value": "${odoo_username}" },
+      { "name": "MODEL_MEDIUM", "value": "${model_medium}" },
+      { "name": "MODEL_HIGH", "value": "${model_high}" },
+      { "name": "LANGFUSE_HOST", "value": "${langfuse_host}" },
+      { "name": "SLACK_CHANNEL", "value": "${slack_channel}" }
+    ],
+    "secrets": [
+      { "name": "ANTHROPIC_API_KEY", "valueFrom": "${integration_secret_arn}:anthropic_api_key::" },
+      { "name": "AI_OPS_SHARED_TOKEN", "valueFrom": "${integration_secret_arn}:ai_ops_shared_token::" },
+      { "name": "ODOO_PASSWORD", "valueFrom": "${integration_secret_arn}:odoo_agent_password::" },
+      { "name": "SLACK_BOT_TOKEN", "valueFrom": "${integration_secret_arn}:slack_bot_token::" },
+      { "name": "SLACK_SIGNING_SECRET", "valueFrom": "${integration_secret_arn}:slack_signing_secret::" },
+      { "name": "LANGFUSE_PUBLIC_KEY", "valueFrom": "${integration_secret_arn}:langfuse_public_key::" },
+      { "name": "LANGFUSE_SECRET_KEY", "valueFrom": "${integration_secret_arn}:langfuse_secret_key::" }
+    ],
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "/ecs/fastapi",
+        "awslogs-region": "${aws_region}",
+        "awslogs-stream-prefix": "fastapi"
+      }
+    }
+  }
+]

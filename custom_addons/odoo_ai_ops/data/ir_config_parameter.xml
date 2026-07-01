@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Seed sensible defaults once. noupdate=1 so admin/UI changes survive
+         module upgrades. Secrets (tokens, Shopify creds) are intentionally NOT
+         seeded here - at runtime they are resolved from the container
+         environment / Secrets Manager (see ai_ops_settings.py). -->
+    <data noupdate="1">
+        <record id="param_bypass_threshold" model="ir.config_parameter">
+            <field name="key">odoo_ai_ops.bypass_threshold</field>
+            <field name="value">10.0</field>
+        </record>
+        <record id="param_auto_reject_enabled" model="ir.config_parameter">
+            <field name="key">odoo_ai_ops.auto_reject_enabled</field>
+            <field name="value">True</field>
+        </record>
+        <record id="param_shopify_api_version" model="ir.config_parameter">
+            <field name="key">odoo_ai_ops.shopify_api_version</field>
+            <field name="value">2025-01</field>
+        </record>
+    </data>
+</odoo>

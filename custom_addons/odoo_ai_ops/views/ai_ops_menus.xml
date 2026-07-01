@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Root application menu -->
+    <menuitem id="menu_ai_ops_root" name="AI Ops"
+              web_icon="odoo_ai_ops,static/description/icon.png"
+              sequence="90"
+              groups="odoo_ai_ops.group_ai_ops_user"/>
+
+    <!-- Operations -->
+    <menuitem id="menu_ai_ops_operations" name="Operations"
+              parent="menu_ai_ops_root" sequence="10"/>
+    <menuitem id="menu_ai_ops_tasks" name="Tasks"
+              parent="menu_ai_ops_operations"
+              action="action_ai_ops_task" sequence="10"/>
+
+    <!-- Configuration -->
+    <menuitem id="menu_ai_ops_config" name="Configuration"
+              parent="menu_ai_ops_root" sequence="90"
+              groups="odoo_ai_ops.group_ai_ops_manager"/>
+    <menuitem id="menu_ai_ops_settings" name="Settings"
+              parent="menu_ai_ops_config"
+              action="action_ai_ops_config_settings" sequence="10"/>
+</odoo>

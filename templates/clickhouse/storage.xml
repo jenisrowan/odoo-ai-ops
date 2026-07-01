@@ -1,0 +1,40 @@
+<?xml version="1.0"?>
+<!--
+  ClickHouse tiered storage: hot parts on the local io2 EBS volume (the
+  `default` disk = /var/lib/clickhouse), older parts offloaded to Amazon S3 via
+  the free S3 Gateway VPC endpoint. The bucket endpoint/region are injected from
+  the task environment (from_env) so the same image works across environments;
+  S3 auth uses the ECS task role (use_environment_credentials).
+
+  Tables opt in with:  SETTINGS storage_policy = 'tiered'
+  and move old data with a TTL, e.g.:  TTL toStartOfDay(timestamp) + INTERVAL 30 DAY TO VOLUME 'cold'
+-->
+<clickhouse>
+  <storage_configuration>
+    <disks>
+      <s3_cold>
+        <type>s3</type>
+        <endpoint from_env="CLICKHOUSE_S3_ENDPOINT"></endpoint>
+        <region from_env="CLICKHOUSE_S3_REGION"></region>
+        <use_environment_credentials>true</use_environment_credentials>
+        <!-- Local metadata cache for the S3 disk keeps hot lookups fast. -->
+        <metadata_path>/var/lib/clickhouse/disks/s3_cold/</metadata_path>
+      </s3_cold>
+    </disks>
+    <policies>
+      <tiered>
+        <volumes>
+          <hot>
+            <disk>default</disk>
+          </hot>
+          <cold>
+            <disk>s3_cold</disk>
+            <prefer_not_to_merge>true</prefer_not_to_merge>
+          </cold>
+        </volumes>
+        <!-- When the hot volume passes 80% full, start moving parts to cold. -->
+        <move_factor>0.2</move_factor>
+      </tiered>
+    </policies>
+  </storage_configuration>
+</clickhouse>

@@ -6,11 +6,11 @@
 # during ECS scale-in events.
 #
 # ECS Task Stopping Lifecycle (service-managed tasks):
-#   1. DEACTIVATING  — ECS instructs the ALB to deregister this target.
+#   1. DEACTIVATING  - ECS instructs the ALB to deregister this target.
 #                      The ALB stops routing NEW requests and waits for
 #                      the deregistration_delay (60 s) for in-flight connections
 #                      to complete. No traffic reaches this task after this phase.
-#   2. STOPPING      — ECS sends SIGTERM to our containers. By this point,
+#   2. STOPPING      - ECS sends SIGTERM to our containers. By this point,
 #                      the ALB has already fully drained. No sleep needed.
 #
 # Our shutdown sequence on SIGTERM:
@@ -28,10 +28,10 @@ set -euo pipefail
 ODOO_PID=""
 
 _graceful_shutdown() {
-    echo "[entrypoint] SIGTERM received — ECS has already drained the ALB. Stopping Odoo gracefully."
+    echo "[entrypoint] SIGTERM received - ECS has already drained the ALB. Stopping Odoo gracefully."
 
     if [ -z "$ODOO_PID" ]; then
-        echo "[entrypoint] Odoo has not started yet — exiting immediately."
+        echo "[entrypoint] Odoo has not started yet - exiting immediately."
         exit 0
     fi
 
@@ -58,7 +58,7 @@ trap '_graceful_shutdown' SIGTERM SIGINT
 # Start Odoo via the upstream image entrypoint.
 # We run it in the background so this script (PID 1) remains the signal target.
 # The upstream /entrypoint.sh honours all env vars (HOST, PORT, USER, PASSWORD, …)
-# and calls 'exec odoo' — but since we're backgrounding it, 'exec' just replaces
+# and calls 'exec odoo' - but since we're backgrounding it, 'exec' just replaces
 # the subshell, which is fine; the resulting odoo process is what we wait on.
 # ---------------------------------------------------------------------------
 echo "[entrypoint] Starting Odoo..."

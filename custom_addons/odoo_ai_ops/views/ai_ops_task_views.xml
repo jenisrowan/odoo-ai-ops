@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- List view -->
+    <record id="view_ai_ops_task_list" model="ir.ui.view">
+        <field name="name">ai.ops.task.list</field>
+        <field name="model">ai.ops.task</field>
+        <field name="arch" type="xml">
+            <list string="AI Ops Tasks" decoration-danger="state == 'failed'"
+                  decoration-warning="state == 'pending_approval'"
+                  decoration-muted="state in ('done', 'bypassed')">
+                <field name="name"/>
+                <field name="task_type"/>
+                <field name="risk_level" widget="badge"
+                       decoration-danger="risk_level == 'high'"
+                       decoration-warning="risk_level == 'medium'"/>
+                <field name="shopify_order_name" optional="show"/>
+                <field name="order_total" widget="monetary" optional="show"/>
+                <field name="currency_id" column_invisible="1"/>
+                <field name="decision" optional="hide"/>
+                <field name="state" widget="badge"
+                       decoration-success="state in ('approved', 'done')"
+                       decoration-danger="state in ('rejected', 'failed', 'bypassed')"
+                       decoration-warning="state == 'pending_approval'"/>
+                <field name="create_date"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Form view -->
+    <record id="view_ai_ops_task_form" model="ir.ui.view">
+        <field name="name">ai.ops.task.form</field>
+        <field name="model">ai.ops.task</field>
+        <field name="arch" type="xml">
+            <form string="AI Ops Task">
+                <header>
+                    <button name="action_approve" type="object" string="Approve"
+                            class="oe_highlight" invisible="state != 'pending_approval'"
+                            groups="odoo_ai_ops.group_ai_ops_user"/>
+                    <button name="action_reject" type="object" string="Reject &amp; Cancel"
+                            invisible="state != 'pending_approval'"
+                            confirm="Reject this order and cancel it in Shopify?"
+                            groups="odoo_ai_ops.group_ai_ops_user"/>
+                    <button name="dispatch_fraud_workflow" type="object"
+                            string="Re-dispatch to Agent"
+                            invisible="task_type != 'fraud' or state not in ('queued', 'failed')"
+                            groups="odoo_ai_ops.group_ai_ops_manager"/>
+                    <button name="dispatch_reconciliation_workflow" type="object"
+                            string="Start Reconciliation"
+                            class="oe_highlight"
+                            invisible="task_type != 'reconciliation' or state not in ('draft', 'queued', 'failed')"
+                            groups="odoo_ai_ops.group_ai_ops_user"/>
+                    <field name="state" widget="statusbar"
+                           statusbar_visible="queued,running,pending_approval,done"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1><field name="name" readonly="1"/></h1>
+                    </div>
+                    <group>
+                        <group string="Classification">
+                            <field name="task_type"/>
+                            <field name="risk_level"/>
+                            <field name="decision" readonly="1"/>
+                            <field name="bypass_reason" invisible="not bypass_reason"/>
+                        </group>
+                        <group string="Order / Product">
+                            <field name="shopify_order_name"/>
+                            <field name="shopify_order_id"/>
+                            <field name="order_total" widget="monetary"/>
+                            <field name="currency_id" groups="base.group_multi_currency"/>
+                            <field name="product_id"
+                                   invisible="task_type != 'reconciliation'"/>
+                        </group>
+                    </group>
+                    <group>
+                        <group string="Agent / Approval">
+                            <field name="agent_run_id" readonly="1"/>
+                            <field name="approver_id" readonly="1"/>
+                            <field name="approval_date" readonly="1"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="AI Analysis" name="analysis">
+                            <field name="analysis" readonly="1" nolabel="1"
+                                   placeholder="The agent's fraud analysis appears here once available."/>
+                        </page>
+                        <page string="Raw Payload" name="payload"
+                              groups="odoo_ai_ops.group_ai_ops_manager">
+                            <field name="payload" readonly="1" nolabel="1" widget="ace"
+                                   options="{'mode': 'json'}"/>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <!-- Search view -->
+    <record id="view_ai_ops_task_search" model="ir.ui.view">
+        <field name="name">ai.ops.task.search</field>
+        <field name="model">ai.ops.task</field>
+        <field name="arch" type="xml">
+            <search string="AI Ops Tasks">
+                <field name="name"/>
+                <field name="shopify_order_name"/>
+                <field name="shopify_order_id"/>
+                <field name="agent_run_id"/>
+                <filter name="pending_approval" string="Pending Approval"
+                        domain="[('state', '=', 'pending_approval')]"/>
+                <filter name="running" string="Running"
+                        domain="[('state', 'in', ('queued', 'running'))]"/>
+                <filter name="auto_rejected" string="Auto-Rejected"
+                        domain="[('state', '=', 'bypassed')]"/>
+                <filter name="high_risk" string="High Risk"
+                        domain="[('risk_level', '=', 'high')]"/>
+                <separator/>
+                <filter name="fraud" string="Fraud" domain="[('task_type', '=', 'fraud')]"/>
+                <filter name="reconciliation" string="Reconciliation"
+                        domain="[('task_type', '=', 'reconciliation')]"/>
+                <group name="group_by">
+                    <filter name="group_state" string="Status" context="{'group_by': 'state'}"/>
+                    <filter name="group_type" string="Type" context="{'group_by': 'task_type'}"/>
+                    <filter name="group_risk" string="Risk" context="{'group_by': 'risk_level'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- Action -->
+    <record id="action_ai_ops_task" model="ir.actions.act_window">
+        <field name="name">AI Ops Tasks</field>
+        <field name="res_model">ai.ops.task</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_ai_ops_task_search"/>
+        <field name="context">{'search_default_pending_approval': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">No AI Ops tasks yet</p>
+            <p>Tasks appear here as Shopify order-risk webhooks and reconciliation
+               requests are processed by the AI agent.</p>
+        </field>
+    </record>
+
+    <!-- Product action: launch a reconciliation task straight from a product.
+         Appears under the "Action" menu on product list/form (Path 1). -->
+    <record id="action_reconcile_product" model="ir.actions.server">
+        <field name="name">Reconcile stock with AI</field>
+        <field name="model_id" ref="product.model_product_product"/>
+        <field name="binding_model_id" ref="product.model_product_product"/>
+        <field name="binding_view_types">list,form</field>
+        <field name="groups_id" eval="[(4, ref('group_ai_ops_user'))]"/>
+        <field name="state">code</field>
+        <field name="code">
+for record in records:
+    env["ai.ops.task"].start_reconciliation_for_product(record.id)
+        </field>
+    </record>
+
+</odoo>

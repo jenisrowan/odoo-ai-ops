@@ -1,0 +1,30 @@
+# Runtime dependencies for the FastAPI + LangGraph agent.
+# Fully pinned for reproducible production image builds - no floating/`latest`.
+# Resolved and verified together (see agent/tests passing on this set).
+
+# Web framework
+fastapi==0.138.0
+uvicorn[standard]==0.49.0
+starlette==1.3.1
+
+# Validation / config
+pydantic==2.13.4
+pydantic-settings==2.14.2
+
+# HTTP + AWS
+httpx==0.28.1
+boto3==1.43.37
+
+# Anthropic Claude + LangChain/LangGraph
+anthropic==0.112.0
+langchain==1.3.11
+langchain-core==1.4.8
+langchain-anthropic==1.4.8
+langgraph==1.2.6
+
+# Valkey/Redis-backed LangGraph checkpointer (HITL state persistence)
+langgraph-checkpoint-redis==0.5.0
+redis==7.4.1
+
+# Self-hosted telemetry
+langfuse==4.12.0

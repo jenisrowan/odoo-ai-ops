@@ -1,82 +1,130 @@
-name: Deploy Odoo to AWS via Terraform
+name: Build & Deploy to AWS
 
 on:
   workflow_dispatch:
+    inputs:
+      apply_infra:
+        description: "Run full 'terraform apply' (rolling deploy of all services)"
+        type: boolean
+        default: true
 
 env:
   AWS_REGION: ap-south-1
   ODOO_ECR_REPOSITORY: odoo-custom
   NGINX_ECR_REPOSITORY: nginx-custom
+  FASTAPI_ECR_REPOSITORY: fastapi-agent
+  CLICKHOUSE_ECR_REPOSITORY: clickhouse-custom
 
-# Added id-token: write here, which is required for OIDC!
+# id-token: write is required for OIDC role assumption.
 permissions:
   id-token: write
   contents: read
 
 jobs:
   deploy:
-    name: Build & Deploy
+    name: Build images & deploy
     runs-on: ubuntu-latest
     environment: production
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v6
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v6
-      with:
-        role-to-assume: ${{ vars.AWS_OIDC_ROLE_ARN }}
-        aws-region: ${{ env.AWS_REGION }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_OIDC_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v4
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
 
-    - name: Setup Docker Buildx
-      uses: docker/setup-buildx-action@v4
+      - name: Setup QEMU (for arm64 agent image)
+        uses: docker/setup-qemu-action@v3
 
-    - name: Terraform Init
-      working-directory: ./terraform
-      run: terraform init
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-    - name: Create ECR Repositories via Terraform
-      working-directory: ./terraform
-      run: |
-        terraform apply -auto-approve \
-          -target="aws_ecr_repository.odoo" \
-          -target="aws_ecr_repository.nginx" \
-          -var="odoo_image_url=dummy" \
-          -var="nginx_image_url=dummy"
+      - name: Terraform Init
+        working-directory: ./terraform
+        run: terraform init -input=false
 
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
+      # Create just the ECR repositories first so we have somewhere to push.
+      - name: Bootstrap ECR repositories
+        working-directory: ./terraform
+        run: |
+          terraform apply -auto-approve -input=false \
+            -target=module.ecr \
+            -var="odoo_image_url=bootstrap" \
+            -var="nginx_image_url=bootstrap" \
+            -var="fastapi_image_url=bootstrap"
 
-    - name: Build, tag, and push Odoo image
-      id: build-odoo
-      uses: docker/build-push-action@v7
-      with:
-        context: .
-        file: templates/Dockerfile.odoo
-        push: true
-        tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.ODOO_ECR_REPOSITORY }}:${{ github.sha }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Build, tag, and push Nginx image
-      id: build-nginx
-      uses: docker/build-push-action@v7
-      with:
-        context: .
-        file: templates/Dockerfile.nginx
-        push: true
-        tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.NGINX_ECR_REPOSITORY }}:${{ github.sha }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+      # All ECS hosts are Graviton (c6g/m6g/r6g) -> every image is built arm64.
+      - name: Build & push Odoo image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: templates/Dockerfile.odoo
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.ODOO_ECR_REPOSITORY }}:${{ github.sha }}
+          cache-from: type=gha,scope=odoo
+          cache-to: type=gha,mode=max,scope=odoo
 
-    - name: Terraform Apply
-      working-directory: ./terraform
-      run: |
-        terraform apply -auto-approve \
-          -var="odoo_image_url=${{ steps.login-ecr.outputs.registry }}/${{ env.ODOO_ECR_REPOSITORY }}:${{ github.sha }}" \
-          -var="nginx_image_url=${{ steps.login-ecr.outputs.registry }}/${{ env.NGINX_ECR_REPOSITORY }}:${{ github.sha }}"
+      - name: Build & push Nginx image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: templates/Dockerfile.nginx
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.NGINX_ECR_REPOSITORY }}:${{ github.sha }}
+          cache-from: type=gha,scope=nginx
+          cache-to: type=gha,mode=max,scope=nginx
+
+      - name: Build & push FastAPI agent image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: templates/Dockerfile.fastapi
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.FASTAPI_ECR_REPOSITORY }}:${{ github.sha }}
+          cache-from: type=gha,scope=fastapi
+          cache-to: type=gha,mode=max,scope=fastapi
+
+      - name: Build & push ClickHouse image (S3 tiered-storage config)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: templates/Dockerfile.clickhouse
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.CLICKHOUSE_ECR_REPOSITORY }}:${{ github.sha }}
+          cache-from: type=gha,scope=clickhouse
+          cache-to: type=gha,mode=max,scope=clickhouse
+
+      # Full apply rolls out new task-definition revisions referencing the new
+      # image tags -> ECS performs a rolling deployment for each service.
+      - name: Terraform Apply (rolling deploy)
+        if: ${{ inputs.apply_infra }}
+        working-directory: ./terraform
+        run: |
+          terraform apply -auto-approve -input=false \
+            -var="odoo_image_url=${{ steps.login-ecr.outputs.registry }}/${{ env.ODOO_ECR_REPOSITORY }}:${{ github.sha }}" \
+            -var="nginx_image_url=${{ steps.login-ecr.outputs.registry }}/${{ env.NGINX_ECR_REPOSITORY }}:${{ github.sha }}" \
+            -var="fastapi_image_url=${{ steps.login-ecr.outputs.registry }}/${{ env.FASTAPI_ECR_REPOSITORY }}:${{ github.sha }}" \
+            -var="clickhouse_image_url=${{ steps.login-ecr.outputs.registry }}/${{ env.CLICKHOUSE_ECR_REPOSITORY }}:${{ github.sha }}"
+
+      # Belt-and-suspenders: force a new deployment in case only the image
+      # tag changed and the service didn't otherwise re-deploy.
+      - name: Force ECS rolling deployments
+        if: ${{ inputs.apply_infra }}
+        run: |
+          for svc in odoo-service fastapi-service clickhouse-service langfuse-service; do
+            aws ecs update-service --cluster odoo-cluster --service "$svc" --force-new-deployment >/dev/null
+          done

@@ -1,0 +1,18 @@
+[project]
+name = "odoo-ai-ops-agent"
+version = "1.0.0"
+description = "FastAPI + LangGraph agent for the Odoo AI Ops platform"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "B", "UP"]
+ignore = ["B008"]  # FastAPI uses callables (Depends/Header) as argument defaults
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]

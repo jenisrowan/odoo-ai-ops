@@ -2,7 +2,7 @@
   {
     "name": "odoo",
     "image": "${odoo_image_url}",
-    "cpu": 1536,
+    "cpu": 3456,
     "memory": 6912,
     "stopTimeout": 120,
     "essential": true,
@@ -38,6 +38,14 @@
       {
         "name": "REDIS_URL",
         "value": "rediss://${redis_host}:${redis_port}"
+      },
+      {
+        "name": "AGENT_BASE_URL",
+        "value": "${agent_base_url}"
+      },
+      {
+        "name": "SHOPIFY_API_VERSION",
+        "value": "${shopify_api_version}"
       }
     ],
     "secrets": [
@@ -48,6 +56,22 @@
       {
         "name": "ODOO_ADMIN_PASSWD",
         "valueFrom": "${admin_password_arn}:password::"
+      },
+      {
+        "name": "AI_OPS_SHARED_TOKEN",
+        "valueFrom": "${integration_secret_arn}:ai_ops_shared_token::"
+      },
+      {
+        "name": "SHOPIFY_ADMIN_TOKEN",
+        "valueFrom": "${integration_secret_arn}:shopify_admin_token::"
+      },
+      {
+        "name": "SHOPIFY_SHOP_DOMAIN",
+        "valueFrom": "${integration_secret_arn}:shopify_shop_domain::"
+      },
+      {
+        "name": "SHOPIFY_WEBHOOK_SECRET",
+        "valueFrom": "${integration_secret_arn}:shopify_webhook_secret::"
       }
     ],
     "mountPoints": [

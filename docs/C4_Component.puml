@@ -6,7 +6,7 @@ title Component Diagram - App Clusters & Data Flow
 LAYOUT_TOP_DOWN()
 
 Container(apigw, "API Gateway", "AWS", "Webhook entry point")
-Component(lambda_auth, "Lambda Authorizer", "AWS Lambda", "Verifies signatures & Slack challenges")
+Component(lambda_auth, "Webhook Verify+Ingest Lambda", "AWS Lambda", "Proxy integration: verifies Shopify/Slack HMAC, answers Slack challenge, enqueues to SQS")
 ContainerQueue(sqs, "SQS Queue", "AWS", "Durable webhook buffer")
 Container(alb, "Application Load Balancer", "AWS ALB", "Entry point for normal web traffic")
 Container(nginx, "Nginx Sidecar", "Docker Container", "Reverse proxy to Odoo")
@@ -27,8 +27,8 @@ System_Boundary(pgbouncer_cluster, "PgBouncer Cluster") {
     Component(pgbouncer, "PgBouncer", "Connection Pooler", "Pools DB connections to prevent starvational lockups.")
 }
 
-Rel(apigw, lambda_auth, "Authorizes request", "Sync")
-Rel(apigw, sqs, "Enqueues incoming webhooks", "HTTPS")
+Rel(apigw, lambda_auth, "Proxy integration (verify + challenge)", "Sync")
+Rel(lambda_auth, sqs, "Enqueues verified webhooks", "SendMessage")
 Rel(fastapi, sqs, "Workers poll and delete processed webhooks", "Boto3")
 Rel(alb, nginx, "Routes standard user traffic", "HTTP")
 Rel(nginx, odoo, "Reverse proxies to", "HTTP")

@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="res_config_settings_view_form_ai_ops" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.ai.ops</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <app data-string="AI Ops" string="AI Ops" name="odoo_ai_ops"
+                     logo="/odoo_ai_ops/static/description/icon.png">
+                    <block title="Fraud Gatekeeper" name="ai_ops_gatekeeper">
+                        <setting string="Cheap-Order Auto-Rejection"
+                                 help="Cancel cheap, risky orders directly in Shopify without spending LLM tokens.">
+                            <field name="ai_ops_auto_reject_enabled"/>
+                            <div class="content-group mt16"
+                                 invisible="not ai_ops_auto_reject_enabled">
+                                <div class="row">
+                                    <label for="ai_ops_bypass_threshold" string="Reject orders under"
+                                           class="col-lg-4 o_light_label"/>
+                                    <field name="ai_ops_bypass_threshold"/>
+                                </div>
+                            </div>
+                        </setting>
+                    </block>
+                    <block title="Agent Cluster" name="ai_ops_agent">
+                        <setting string="FastAPI Agent" help="Endpoint and shared auth token for the LangGraph agent cluster.">
+                            <div class="content-group">
+                                <div class="row">
+                                    <label for="ai_ops_agent_base_url" class="col-lg-4 o_light_label"/>
+                                    <field name="ai_ops_agent_base_url"
+                                           placeholder="http://fastapi.odoo.local:8000"/>
+                                </div>
+                                <div class="row">
+                                    <label for="ai_ops_shared_token" class="col-lg-4 o_light_label"/>
+                                    <field name="ai_ops_shared_token" password="True"
+                                           placeholder="Injected from Secrets Manager in production"/>
+                                </div>
+                            </div>
+                        </setting>
+                    </block>
+                    <block title="Shopify" name="ai_ops_shopify">
+                        <setting string="Shopify Admin API" help="Used to cancel/reject orders directly.">
+                            <div class="content-group">
+                                <div class="row">
+                                    <label for="ai_ops_shopify_shop_domain" class="col-lg-4 o_light_label"/>
+                                    <field name="ai_ops_shopify_shop_domain"
+                                           placeholder="my-store.myshopify.com"/>
+                                </div>
+                                <div class="row">
+                                    <label for="ai_ops_shopify_admin_token" class="col-lg-4 o_light_label"/>
+                                    <field name="ai_ops_shopify_admin_token" password="True"
+                                           placeholder="Injected from Secrets Manager in production"/>
+                                </div>
+                                <div class="row">
+                                    <label for="ai_ops_shopify_api_version" class="col-lg-4 o_light_label"/>
+                                    <field name="ai_ops_shopify_api_version"/>
+                                </div>
+                            </div>
+                        </setting>
+                    </block>
+                </app>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="action_ai_ops_config_settings" model="ir.actions.act_window">
+        <field name="name">AI Ops Settings</field>
+        <field name="res_model">res.config.settings</field>
+        <field name="view_mode">form</field>
+        <field name="context">{'module': 'odoo_ai_ops', 'bin_size': False}</field>
+    </record>
+</odoo>
