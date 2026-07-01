@@ -2,11 +2,13 @@
 name = "odoo-ai-ops-agent"
 version = "1.0.0"
 description = "FastAPI + LangGraph agent for the Odoo AI Ops platform"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 
 [tool.ruff]
 line-length = 100
-target-version = "py312"
+# Runtime is 3.14 (see requires-python); this is the highest target the pinned
+# ruff understands and only sets the minimum syntax baseline for lint rules.
+target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "B", "UP"]
@@ -16,3 +18,6 @@ ignore = ["B008"]  # FastAPI uses callables (Depends/Header) as argument default
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+# Put the package root on sys.path so `import app` works under the bare `pytest`
+# console script in CI (which, unlike `python -m pytest`, does not add CWD).
+pythonpath = ["."]

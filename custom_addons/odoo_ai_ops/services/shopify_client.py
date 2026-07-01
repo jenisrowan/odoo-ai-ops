@@ -45,6 +45,39 @@ mutation OrderCancel(
 """
 
 
+# Look up an inventory item (and its stocked levels) by SKU.
+_INVENTORY_BY_SKU_QUERY = """
+query InventoryBySku($q: String!) {
+  inventoryItems(first: 5, query: $q) {
+    edges {
+      node {
+        id
+        sku
+        inventoryLevels(first: 20) {
+          edges {
+            node {
+              location { id name }
+              quantities(names: ["available"]) { name quantity }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+# Set the "available" quantity of an inventory item at a location.
+_INVENTORY_SET_MUTATION = """
+mutation SetQuantities($input: InventorySetQuantitiesInput!) {
+  inventorySetQuantities(input: $input) {
+    inventoryAdjustmentGroup { createdAt reason }
+    userErrors { field message code }
+  }
+}
+"""
+
+
 class ShopifyError(Exception):
     """Raised on transport failures or GraphQL/user errors from Shopify."""
 
@@ -114,3 +147,65 @@ class ShopifyClient:
         if user_errors:
             raise ShopifyError("Shopify refused cancellation: %s" % user_errors)
         return result.get("job") or {}
+
+    # ------------------------------------------------------------------
+    # Inventory (used by the reconciliation root-cause analysis)
+    # ------------------------------------------------------------------
+    def _find_inventory_item(self, sku):
+        """Return the first Shopify inventory item node matching ``sku`` (or None)."""
+        data = self._execute(_INVENTORY_BY_SKU_QUERY, {"q": "sku:%s" % sku})
+        edges = ((data or {}).get("inventoryItems") or {}).get("edges") or []
+        return edges[0]["node"] if edges else None
+
+    def get_available_inventory(self, sku):
+        """Return the total 'available' quantity across all locations for ``sku``.
+
+        Returns ``None`` if no inventory item matches the SKU.
+        """
+        node = self._find_inventory_item(sku)
+        if not node:
+            return None
+        total = 0.0
+        for lvl in (node.get("inventoryLevels") or {}).get("edges", []):
+            for q in lvl["node"].get("quantities") or []:
+                if q.get("name") == "available":
+                    total += float(q.get("quantity") or 0)
+        return total
+
+    def set_inventory_quantity(self, sku, qty, reason="correction", location_id=None):
+        """Set the 'available' quantity for ``sku`` at a location.
+
+        Used when Odoo is the source of truth (e.g. a Shopify undercount caused
+        by human error) and we push Odoo's on-hand back to Shopify.
+        """
+        node = self._find_inventory_item(sku)
+        if not node:
+            raise ShopifyError("No Shopify inventory item found for SKU %s" % sku)
+        levels = (node.get("inventoryLevels") or {}).get("edges", [])
+        if location_id is None:
+            if not levels:
+                raise ShopifyError("Inventory item %s has no stocked location." % sku)
+            location_id = levels[0]["node"]["location"]["id"]
+
+        data = self._execute(
+            _INVENTORY_SET_MUTATION,
+            {
+                "input": {
+                    "name": "available",
+                    "reason": reason,
+                    "ignoreCompareQuantity": True,
+                    "quantities": [
+                        {
+                            "inventoryItemId": node["id"],
+                            "locationId": location_id,
+                            "quantity": int(round(float(qty))),
+                        }
+                    ],
+                }
+            },
+        )
+        result = (data or {}).get("inventorySetQuantities") or {}
+        user_errors = result.get("userErrors") or []
+        if user_errors:
+            raise ShopifyError("Shopify refused inventory set: %s" % user_errors)
+        return {"sku": sku, "location_id": location_id, "quantity": int(round(float(qty)))}

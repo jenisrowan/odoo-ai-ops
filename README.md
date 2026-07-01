@@ -19,7 +19,7 @@ To achieve this, the architecture is designed to:
 ## 🏗️ Architecture & Infrastructure
 
 The infrastructure is deployed inside a multi-AZ AWS VPC.
-
+```
 
                   USER (Internet) / Webhooks
                              │
@@ -53,7 +53,7 @@ The infrastructure is deployed inside a multi-AZ AWS VPC.
            [ ClickHouse ]           [ Langfuse RDS ]- Shopify GraphQL
            (Tiered to S3)             (Postgres)    - Slack Block Kit
 
-
+```
 ### Core Infrastructure Components
 
 * **Compute:** Odoo, Nginx, and FastAPI run on ECS EC2 capacity providers. PgBouncer runs as a high-availability layer to manage database connection pooling efficiently, communicating via ECS Service Connect.

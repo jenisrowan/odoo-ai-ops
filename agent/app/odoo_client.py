@@ -162,3 +162,19 @@ class OdooClient:
             "apply_inventory_patch",
             [product_id, counted_qty, location_id, reason],
         )
+
+    async def discrepancy_context(self, product_id: int, fetch_shopify: bool = True) -> Any:
+        """Odoo vs Shopify stock + the evidence to explain a divergence."""
+        return await self.execute_kw(
+            "ai.ops.inventory",
+            "discrepancy_context",
+            [product_id, fetch_shopify],
+        )
+
+    async def push_inventory_to_shopify(self, product_id: int, qty: float, reason=None) -> Any:
+        """Correct Shopify's available quantity from Odoo (Odoo is source of truth)."""
+        return await self.execute_kw(
+            "ai.ops.inventory",
+            "push_inventory_to_shopify",
+            [product_id, qty, reason],
+        )

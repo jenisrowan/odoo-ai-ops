@@ -4,7 +4,7 @@
 #   docker build -f templates/Dockerfile.fastapi -t fastapi-agent .
 # =============================================================================
 # Pinned to a specific patch (no floating tags in production).
-FROM python:3.12.8-slim-bookworm AS base
+FROM python:3.14-slim-bookworm AS base
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

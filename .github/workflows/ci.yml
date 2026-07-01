@@ -22,11 +22,11 @@ jobs:
     name: Lint & format (ruff)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Install ruff
         run: pip install ruff==0.15.20
@@ -53,11 +53,11 @@ jobs:
       run:
         working-directory: agent
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.14"
           cache: pip
           cache-dependency-path: agent/requirements-dev.txt
 
@@ -74,11 +74,11 @@ jobs:
     name: Lambda tests (pytest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Install test deps
         run: pip install boto3==1.43.37 pytest==8.3.4
@@ -107,15 +107,18 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install & test the module inside the Odoo 19 image
+        # DB config is passed via the HOST/PORT/USER/PASSWORD env vars the Odoo
+        # image entrypoint honors — passing --db_host is overridden by the
+        # entrypoint's default of "db" and would fail to resolve.
         run: |
           docker run --rm --network host \
+            -e HOST=127.0.0.1 -e PORT=5432 -e USER=odoo -e PASSWORD=odoo \
             -v "${PWD}/custom_addons:/mnt/extra-addons:ro" \
             odoo:19.0 \
             odoo -d test_db -i odoo_ai_ops \
-              --db_host=127.0.0.1 --db_port=5432 --db_user=odoo --db_password=odoo \
               --addons-path=/usr/lib/python3/dist-packages/odoo/addons,/mnt/extra-addons \
               --data-dir=/tmp/odoo-data \
               --test-enable --test-tags /odoo_ai_ops \
@@ -131,7 +134,7 @@ jobs:
       run:
         working-directory: terraform
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: hashicorp/setup-terraform@v3
 

@@ -84,7 +84,7 @@ resource "aws_lambda_function" "webhook_authorizer" {
   function_name    = "${var.name_prefix}-webhook-authorizer"
   role             = aws_iam_role.webhook_lambda_role.arn
   handler          = "handler.lambda_handler"
-  runtime          = "python3.12"
+  runtime          = "python3.14"
   architectures    = ["arm64"]
   filename         = data.archive_file.webhook_lambda.output_path
   source_code_hash = data.archive_file.webhook_lambda.output_base64sha256
