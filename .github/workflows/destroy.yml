@@ -31,12 +31,17 @@ jobs:
 
     - name: Terraform Init
       working-directory: ./terraform
-      run: terraform init
+      run: terraform init -input=false
 
+    # Fast + forceful full teardown (everything, including WAF & CloudFront).
+    #   -refresh=false : skip the state-refresh pass (biggest speedup)
+    #   -parallelism=30: more concurrent deletes (default is 10)
+    #   -lock-timeout  : wait briefly for the state lock instead of failing fast
+    # All image vars have defaults, so none are needed for a destroy.
+    # CloudFront (~20 min to delete) dominates the wall-clock; everything
+    # expensive (RDS, ElastiCache, ECS, NAT, EBS) is gone within a few minutes.
     - name: Terraform Destroy
       working-directory: ./terraform
       run: |
-        terraform destroy -auto-approve \
-          -var="odoo_image_url=dummy" \
-          -var="nginx_image_url=dummy" \
-          -var="fastapi_image_url=dummy"
+        terraform destroy -auto-approve -input=false \
+          -refresh=false -parallelism=30 -lock-timeout=5m

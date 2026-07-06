@@ -8,6 +8,9 @@ resource "random_id" "bucket_suffix" {
 # --- ClickHouse cold-storage tier ---
 resource "aws_s3_bucket" "clickhouse_cold" {
   bucket = "${var.name_prefix}-clickhouse-cold-${random_id.bucket_suffix.hex}"
+  # Allow `terraform destroy` to delete the bucket even with objects in it
+  # (ClickHouse writes cold partitions here) so teardown never blocks.
+  force_destroy = true
 }
 
 resource "aws_s3_bucket_public_access_block" "clickhouse_cold" {
@@ -29,7 +32,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "clickhouse_cold" 
 
 # --- Langfuse event/media blob storage ---
 resource "aws_s3_bucket" "langfuse_events" {
-  bucket = "${var.name_prefix}-langfuse-events-${random_id.bucket_suffix.hex}"
+  bucket        = "${var.name_prefix}-langfuse-events-${random_id.bucket_suffix.hex}"
+  force_destroy = true
 }
 
 resource "aws_s3_bucket_public_access_block" "langfuse_events" {

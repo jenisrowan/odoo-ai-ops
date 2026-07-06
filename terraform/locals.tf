@@ -1,7 +1,9 @@
 locals {
-  # Resource name prefix. Kept as "odoo" so the modular refactor preserves the
-  # identities of pre-existing resources (see moved.tf for state migration).
-  name_prefix = "odoo"
+  # Resource name prefix. Defaults to "odoo" so the modular refactor preserves
+  # the identities of pre-existing resources (see moved.tf). Overridable via
+  # var.name_prefix so `terraform test` can apply under a distinct prefix and
+  # avoid colliding with a deployed stack.
+  name_prefix = var.name_prefix
 
   common_tags = merge(
     {

@@ -1,0 +1,55 @@
+name: Terraform Test
+
+# Manual only - never runs on push. The apply mode provisions and destroys real
+# AWS infrastructure, so it is opt-in and gated behind a dropdown.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Which terraform tests to run"
+        type: choice
+        options:
+          - plan-only
+          - plan-and-apply
+        default: plan-only
+
+env:
+  AWS_REGION: ap-south-1
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  terraform-test:
+    name: terraform test (${{ inputs.mode }})
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_OIDC_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+
+      - name: Terraform Init
+        working-directory: ./terraform
+        run: terraform init -input=false
+
+      # PLAN-only: safe, creates nothing (reads data sources).
+      - name: Terraform Test (plan)
+        if: ${{ inputs.mode == 'plan-only' }}
+        working-directory: ./terraform
+        run: terraform test -filter=tests/plan.tftest.hcl
+
+      # PLAN + APPLY: provisions the full stack, asserts, then destroys it.
+      - name: Terraform Test (plan + apply - provisions & destroys real infra)
+        if: ${{ inputs.mode == 'plan-and-apply' }}
+        working-directory: ./terraform
+        run: terraform test

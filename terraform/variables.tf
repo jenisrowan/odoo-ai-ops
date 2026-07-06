@@ -10,6 +10,18 @@ variable "project_name" {
   default     = "odoo-ai-ops"
 }
 
+variable "name_prefix" {
+  description = "Resource name prefix. Keep 'odoo' for the real deployment; override (e.g. in terraform test) to avoid name collisions."
+  type        = string
+  default     = "odoo"
+}
+
+variable "alarm_email" {
+  description = "Email address to receive CloudWatch alarm notifications (DLQ, Lambda errors, service-down, …). Leave empty to create the alarms/SNS topic without an email subscription."
+  type        = string
+  default     = ""
+}
+
 variable "environment" {
   description = "Deployment environment (e.g. prod, staging)."
   type        = string

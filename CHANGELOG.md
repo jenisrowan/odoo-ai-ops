@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [Unreleased] - 2026-07-02
+
+### Added
+- **Native `terraform test` suite**: `terraform/tests/plan.tftest.hcl` (plan mode - asserts the doc-critical invariants: Graviton instance families, RDS `db.m6g.xlarge` + Multi-AZ, Lambda `python3.14`) and `terraform/tests/apply.tftest.hcl` (real apply-mode integration smoke test), plus a **manual-only** `terraform-test.yml` workflow (`plan-only` / `plan-and-apply`). Real AWS provider, no mocks - the apply test provisions and destroys real infra and is opt-in.
+- **Shopify client tests** (`test_shopify_client.py`): order cancellation + inventory read/write with `requests` mocked.
+- **Claude integration tests** (`agent/tests/test_llm_and_graph.py`): risk-tiered model selection and the fraud + reconciliation LangGraph flows with `ChatAnthropic` mocked (no Anthropic calls, no cost).
+- Test-friendly root outputs (instance types, RDS class/Multi-AZ, Lambda runtime, DLQ ARN) to back the assertions.
+- **Proactive alerting** (`modules/observability`): an SNS topic (optional `alarm_email` subscription) plus CloudWatch alarms so live failures page you instead of sitting silently in the logs — webhook **DLQ not empty**, **webhook Lambda errors**, **webhook queue stalled** (oldest message aging), and **Odoo/FastAPI service down** (RunningTaskCount → 0 via Container Insights). Exposed as the `alerts_topic_arn` output.
+
+### Changed
+- Bumped ECS/telemetry CloudWatch log retention 7 -> 14 days for a longer debugging window.
+- **Faster, forceful `destroy.yml`**: `-refresh=false -parallelism=30 -lock-timeout=5m` for a full teardown (everything, including WAF + CloudFront). Added `force_destroy = true` to the telemetry S3 buckets so teardown never blocks on non-empty buckets.
+- **`name_prefix` is now an overridable variable** (default `"odoo"`, so the real deployment is unchanged) - lets `terraform test` apply under a distinct prefix to avoid name collisions.
+
 ## [Unreleased] - 2026-07-01
 
 ### Added

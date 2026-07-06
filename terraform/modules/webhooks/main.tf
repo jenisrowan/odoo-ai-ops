@@ -166,3 +166,12 @@ output "api_gateway_invoke_url" { value = aws_apigatewayv2_stage.default.invoke_
 output "api_host" {
   value = replace(aws_apigatewayv2_api.webhooks.api_endpoint, "https://", "")
 }
+
+# Exposed for terraform test assertions.
+output "lambda_runtime" { value = aws_lambda_function.webhook_authorizer.runtime }
+output "dlq_arn" { value = aws_sqs_queue.webhook_dlq.arn }
+
+# Exposed for CloudWatch alarm dimensions (observability module).
+output "queue_name" { value = aws_sqs_queue.webhook.name }
+output "dlq_name" { value = aws_sqs_queue.webhook_dlq.name }
+output "lambda_function_name" { value = aws_lambda_function.webhook_authorizer.function_name }

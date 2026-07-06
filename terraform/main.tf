@@ -144,3 +144,17 @@ module "telemetry" {
   langfuse_web_image_url    = var.langfuse_web_image_url
   langfuse_worker_image_url = var.langfuse_worker_image_url
 }
+
+module "observability" {
+  source = "./modules/observability"
+
+  name_prefix = local.name_prefix
+  alarm_email = var.alarm_email
+
+  cluster_name       = module.ecs.cluster_name
+  monitored_services = [module.ecs.odoo_service_name, module.ecs.fastapi_service_name]
+
+  webhook_queue_name           = module.webhooks.queue_name
+  webhook_dlq_name             = module.webhooks.dlq_name
+  webhook_lambda_function_name = module.webhooks.lambda_function_name
+}

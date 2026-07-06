@@ -13,3 +13,7 @@ output "valkey_address" {
 output "valkey_port" {
   value = aws_elasticache_serverless_cache.valkey.endpoint[0].port
 }
+
+# Exposed for terraform test assertions.
+output "db_instance_class" { value = aws_db_instance.postgres.instance_class }
+output "db_multi_az" { value = aws_db_instance.postgres.multi_az }

@@ -3,7 +3,7 @@
 
 resource "aws_cloudwatch_log_group" "clickhouse" {
   name              = "/ecs/clickhouse"
-  retention_in_days = 7
+  retention_in_days = 14
 }
 
 resource "aws_ecs_task_definition" "clickhouse" {
