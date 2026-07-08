@@ -128,7 +128,7 @@ def build_reconciliation_graph(runtime):
         if runtime.slack_client is not None:
             try:
                 await runtime.slack_client.post_text(
-                    f":package: *Inventory reconciliation* — {state.get('odoo_task_ref')}\n"
+                    f"*Inventory reconciliation* - {state.get('odoo_task_ref')}\n"
                     f"*Odoo on-hand:* {disc.get('odoo_on_hand')}  "
                     f"*Shopify available:* {disc.get('shopify_available')}  "
                     f"(*Δ* {disc.get('discrepancy_odoo_minus_shopify')})\n"
@@ -160,29 +160,9 @@ def build_reconciliation_graph(runtime):
         action = proposal.get("recommended_action")
         ref = state.get("odoo_task_ref")
 
-        if decision == "approve":
-            try:
-                if action == "update_shopify" and proposal.get("shopify_target_qty") is not None:
-                    # Odoo is source of truth -> correct Shopify (human-error case).
-                    await runtime.odoo_client.push_inventory_to_shopify(
-                        product_id=product_id,
-                        qty=proposal["shopify_target_qty"],
-                        reason=f"AI reconciliation {ref}",
-                    )
-                elif action == "adjust_odoo" and proposal.get("corrected_odoo_qty") is not None:
-                    await runtime.odoo_client.apply_inventory_patch(
-                        product_id=product_id,
-                        counted_qty=proposal["corrected_odoo_qty"],
-                        reason=f"AI reconciliation {ref}",
-                    )
-                else:
-                    # validate_or_investigate_move / create_missing_sale_order /
-                    # no_action -> no automated write; the diagnosis is recorded on
-                    # the Odoo task for a human to act on.
-                    logger.info("[%s] action '%s' recorded for human follow-up.", ref, action)
-            except Exception:  # noqa: BLE001
-                logger.exception("[%s] failed to apply reconciliation action '%s'", ref, action)
-
+        # Persist the manager decision FIRST: Odoo's server-side approval gate
+        # only lets the agent's inventory writes through once the task carries
+        # a recorded 'approve' decision.
         if task_id and decision in ("approve", "reject"):
             try:
                 await runtime.odoo_client.set_approval(
@@ -194,6 +174,47 @@ def build_reconciliation_graph(runtime):
                 )
             except Exception:  # noqa: BLE001
                 logger.exception("[%s] failed to persist decision", ref)
+                # Without the persisted decision Odoo will refuse the write;
+                # don't attempt it against a closed gate.
+                return {}
+
+        if decision == "approve":
+            try:
+                if action == "update_shopify" and proposal.get("shopify_target_qty") is not None:
+                    # Odoo is source of truth -> correct Shopify (human-error case).
+                    await runtime.odoo_client.push_inventory_to_shopify(
+                        product_id=product_id,
+                        qty=proposal["shopify_target_qty"],
+                        reason=f"AI reconciliation {ref}",
+                        task_id=task_id,
+                    )
+                elif action == "adjust_odoo" and proposal.get("corrected_odoo_qty") is not None:
+                    await runtime.odoo_client.apply_inventory_patch(
+                        product_id=product_id,
+                        counted_qty=proposal["corrected_odoo_qty"],
+                        reason=f"AI reconciliation {ref}",
+                        task_id=task_id,
+                    )
+                else:
+                    # validate_or_investigate_move / create_missing_sale_order /
+                    # no_action -> no automated write; the diagnosis is recorded on
+                    # the Odoo task for a human to act on.
+                    logger.info("[%s] action '%s' recorded for human follow-up.", ref, action)
+            except Exception:  # noqa: BLE001
+                logger.exception("[%s] failed to apply reconciliation action '%s'", ref, action)
+                # Surface the failed write on the task so it doesn't sit
+                # closed-but-unapplied.
+                if task_id:
+                    try:
+                        await runtime.odoo_client.register_agent_run(
+                            task_id=task_id,
+                            run_id=state.get("run_id"),
+                            state="failed",
+                            analysis=f"Approved action '{action}' could not be applied; "
+                            "see agent logs.",
+                        )
+                    except Exception:  # noqa: BLE001
+                        logger.exception("[%s] failed to flag the task as failed", ref)
         return {}
 
     builder = StateGraph(ReconciliationState)

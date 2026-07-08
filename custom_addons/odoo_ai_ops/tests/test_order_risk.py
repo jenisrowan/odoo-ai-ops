@@ -93,4 +93,29 @@ class TestOrderRiskGatekeeper(TransactionCase):
         self.assertEqual(out["decision"], "reject")
         self.assertEqual(task.decision, "reject")
         self.assertEqual(task.state, "done")
+        # The relayed manager is recorded by name; approver_id is only set here
+        # because the test runs as a regular Odoo user, not the agent user.
+        self.assertEqual(task.approver_name, "Dana")
+        self.assertEqual(task.approver_id, self.env.user)
         mock_cancel.assert_called_once()
+
+    def test_duplicate_webhook_is_idempotent(self):
+        """A redelivered order-risk webhook must not create a second task."""
+        with patch.object(type(self.Task), "_cancel_in_shopify", return_value=True) as mock_cancel:
+            first = self.Risk.process_webhook(self._payload(7.5, "high", order_id="77001"))
+            second = self.Risk.process_webhook(self._payload(7.5, "high", order_id="77001"))
+        self.assertEqual(first["action"], "auto_reject")
+        self.assertEqual(second["action"], "duplicate")
+        self.assertEqual(second["task"], first["task"])
+        mock_cancel.assert_called_once()
+        tasks = self.Task.search([("shopify_order_id", "=", "77001")])
+        self.assertEqual(len(tasks), 1)
+
+    def test_failed_task_does_not_block_reprocessing(self):
+        """A failed dispatch may be retried when the webhook is redelivered."""
+        with patch.object(type(self.Task), "dispatch_fraud_workflow", return_value={"run_id": "r1"}) as mock_dispatch:
+            first = self.Risk.process_webhook(self._payload(150.0, "high", order_id="77002"))
+            self.Task.search([("name", "=", first["task"])]).write({"state": "failed"})
+            second = self.Risk.process_webhook(self._payload(150.0, "high", order_id="77002"))
+        self.assertEqual(second["action"], "dispatched")
+        self.assertEqual(mock_dispatch.call_count, 2)

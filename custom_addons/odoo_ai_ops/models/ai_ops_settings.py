@@ -32,7 +32,7 @@ PARAM_ENV_FALLBACK = {
     "odoo_ai_ops.shopify_webhook_secret": "SHOPIFY_WEBHOOK_SECRET",
 }
 
-DEFAULT_API_VERSION = "2025-01"
+DEFAULT_API_VERSION = "2026-07"
 DEFAULT_BYPASS_THRESHOLD = 10.0
 
 
@@ -77,6 +77,15 @@ class ResConfigSettings(models.TransientModel):
         string="Enable Cheap-Order Auto-Rejection",
         config_parameter="odoo_ai_ops.auto_reject_enabled",
         default=True,
+    )
+    ai_ops_refund_on_cancel = fields.Boolean(
+        string="Refund When Cancelling in Shopify",
+        config_parameter="odoo_ai_ops.refund_on_cancel",
+        default=False,
+        help="If enabled, Shopify order cancellations issued by AI Ops "
+        "(auto-reject and manager rejections) also refund the payment. "
+        "Disabled by default: fraud rejections usually should not "
+        "auto-refund — void or review the payment instead.",
     )
 
     @api.model

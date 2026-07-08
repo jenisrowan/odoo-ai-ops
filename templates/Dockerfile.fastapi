@@ -3,7 +3,7 @@
 # Build context is the repository root:
 #   docker build -f templates/Dockerfile.fastapi -t fastapi-agent .
 # =============================================================================
-# Pinned to a specific patch (no floating tags in production).
+# Pinned to a specific patch.
 FROM python:3.14-slim-bookworm AS base
 
 ENV PYTHONUNBUFFERED=1 \

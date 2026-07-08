@@ -42,6 +42,34 @@ class AiOpsInventory(models.AbstractModel):
             limit = 100
         return max(1, min(limit, MAX_LIMIT))
 
+    @api.model
+    def _require_approved_task(self, task_id, product_id):
+        """Server-side human-approval gate for the agent's write paths.
+
+        The LangGraph workflow only reaches the write nodes after a manager
+        approved in Slack, but that check lives in the agent. If the agent's
+        JSON-RPC credential leaked, the write methods would otherwise be
+        callable directly. So when the caller is the technical agent user,
+        require a matching ``ai.ops.task`` that carries a persisted *approve*
+        decision (the agent records the decision via ``ai_ops_set_approval``
+        before applying it). Human users (managers) are not gated.
+        """
+        if not self.env.user.has_group("odoo_ai_ops.group_ai_ops_agent"):
+            return
+        if not task_id:
+            raise UserError("task_id is required: agent inventory writes must reference the approved ai.ops.task.")
+        task = self.env["ai.ops.task"].browse(int(task_id))
+        if not task.exists():
+            raise UserError("Unknown ai.ops.task id %s." % task_id)
+        if task.task_type != "reconciliation":
+            raise UserError("Task %s is not a reconciliation task." % task.name)
+        if task.decision != "approve":
+            raise UserError("Task %s has no approved decision recorded; refusing the inventory write." % task.name)
+        if task.product_id and task.product_id.id != int(product_id):
+            raise UserError(
+                "Task %s was approved for product %s, not product %s." % (task.name, task.product_id.id, product_id)
+            )
+
     # ------------------------------------------------------------------
     # 1. Query catalog records
     # ------------------------------------------------------------------
@@ -104,19 +132,20 @@ class AiOpsInventory(models.AbstractModel):
     # 3. Write an inventory adjustment patch
     # ------------------------------------------------------------------
     @api.model
-    def apply_inventory_patch(self, product_id, counted_qty, location_id=None, reason=None):
+    def apply_inventory_patch(self, product_id, counted_qty, location_id=None, reason=None, task_id=None):
         """Apply an inventory adjustment so on-hand quantity == ``counted_qty``.
 
         Uses the Odoo 19 ``stock.quant`` inventory-adjustment flow: set
         ``inventory_quantity`` on the (product, location) quant and apply it.
         Returns a summary dict with the resulting on-hand quantity.
 
-        This is the agent's write-back path; it should only be reached *after*
-        a human approved the reconciliation, but we still validate inputs
-        defensively.
+        This is the agent's write-back path. When called by the agent user,
+        ``task_id`` must reference an ``ai.ops.task`` with a persisted
+        *approve* decision (see :meth:`_require_approved_task`).
         """
         if not product_id:
             raise UserError("product_id is required for apply_inventory_patch().")
+        self._require_approved_task(task_id, product_id)
         try:
             counted_qty = float(counted_qty)
         except (TypeError, ValueError) as exc:
@@ -178,7 +207,7 @@ class AiOpsInventory(models.AbstractModel):
         return ShopifyClient(
             shop_domain=settings._ai_ops_get_param("odoo_ai_ops.shopify_shop_domain"),
             admin_token=settings._ai_ops_get_param("odoo_ai_ops.shopify_admin_token"),
-            api_version=settings._ai_ops_get_param("odoo_ai_ops.shopify_api_version", "2025-01"),
+            api_version=settings._ai_ops_get_param("odoo_ai_ops.shopify_api_version", "2026-07"),
         )
 
     @api.model
@@ -291,14 +320,17 @@ class AiOpsInventory(models.AbstractModel):
     # 5. Push Odoo's on-hand back to Shopify (Odoo is source of truth)
     # ------------------------------------------------------------------
     @api.model
-    def push_inventory_to_shopify(self, product_id, qty, reason=None):
+    def push_inventory_to_shopify(self, product_id, qty, reason=None, task_id=None):
         """Set Shopify's available quantity for a product to ``qty``.
 
         Used for the "Odoo has more stock — Shopify undercount / human error"
-        resolution: Odoo is authoritative, so we correct Shopify.
+        resolution: Odoo is authoritative, so we correct Shopify. When called
+        by the agent user, ``task_id`` must reference an ``ai.ops.task`` with a
+        persisted *approve* decision (see :meth:`_require_approved_task`).
         """
         if not product_id:
             raise UserError("product_id is required for push_inventory_to_shopify().")
+        self._require_approved_task(task_id, product_id)
         product = self.env["product.product"].browse(int(product_id))
         if not product.exists():
             raise UserError("Unknown product_id %s." % product_id)

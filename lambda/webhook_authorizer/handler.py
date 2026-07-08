@@ -149,8 +149,6 @@ def _verify_slack(headers, raw_body) -> bool:
 
 
 def _handle_slack(event, headers, raw_body):
-    # url_verification (sent as JSON) must be answered *before* signature checks
-    # during initial endpoint setup, but we still verify when a secret is set.
     content_type = headers.get("content-type", "")
     parsed_json = None
     if content_type.startswith("application/json"):
@@ -159,7 +157,13 @@ def _handle_slack(event, headers, raw_body):
         except json.JSONDecodeError:
             parsed_json = None
     if isinstance(parsed_json, dict) and parsed_json.get("type") == "url_verification":
-        # Respond with the challenge to complete Slack's handshake.
+        # Slack signs url_verification requests too, so verify whenever a
+        # signing secret is configured. Only when no secret exists yet
+        # (bootstrap/local runs) is the challenge answered unverified - it
+        # merely echoes the challenge and never enqueues anything.
+        if _secret("slack_signing_secret") and not _verify_slack(headers, raw_body):
+            logger.warning("Rejected Slack url_verification: bad signature.")
+            return _response(401, {"error": "invalid_signature"})
         return _response(200, {"challenge": parsed_json.get("challenge", "")})
 
     if not _verify_slack(headers, raw_body):

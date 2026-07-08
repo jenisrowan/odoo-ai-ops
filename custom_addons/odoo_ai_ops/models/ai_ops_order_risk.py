@@ -118,6 +118,37 @@ class AiOpsOrderRisk(models.AbstractModel):
             payload = {}
 
         info = self._extract(payload)
+
+        # Idempotency guard: SQS is at-least-once and Shopify retries webhooks,
+        # so the same order-risk event can arrive more than once. Re-processing
+        # would create a duplicate task, attempt a second Shopify cancellation,
+        # or dispatch a second (paid) LLM workflow. A previously *failed* task
+        # does not block a retry.
+        if info["order_id"]:
+            existing = self.env["ai.ops.task"].search(
+                [
+                    ("task_type", "=", "fraud"),
+                    ("shopify_order_id", "=", info["order_id"]),
+                    ("state", "!=", "failed"),
+                ],
+                limit=1,
+                order="id desc",
+            )
+            if existing:
+                _logger.info(
+                    "AI Ops: duplicate order-risk webhook for order %s (task %s, state %s) - skipping.",
+                    info["order_id"],
+                    existing.name,
+                    existing.state,
+                )
+                return {
+                    "action": "duplicate",
+                    "task": existing.name,
+                    "state": existing.state,
+                    "risk_level": info["risk_level"],
+                    "order_total": info["total"],
+                }
+
         settings = self.env["res.config.settings"]
         threshold = float(settings._ai_ops_get_param("odoo_ai_ops.bypass_threshold", 10.0) or 10.0)
         auto_reject = settings._ai_ops_get_param("odoo_ai_ops.auto_reject_enabled", True)

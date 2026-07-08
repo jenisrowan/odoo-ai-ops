@@ -34,6 +34,12 @@ resource "aws_ecs_service" "pgbouncer" {
     weight            = 100
   }
 
+  # Abort + roll back a failing rollout instead of cycling tasks indefinitely.
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
   network_configuration {
     subnets         = var.private_subnet_ids
     security_groups = [var.pgbouncer_sg_id]

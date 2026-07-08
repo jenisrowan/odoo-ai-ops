@@ -6,8 +6,9 @@ requires-python = ">=3.14"
 
 [tool.ruff]
 line-length = 100
-# Runtime is 3.14 (see requires-python); this is the highest target the pinned
-# ruff understands and only sets the minimum syntax baseline for lint rules.
+# Deliberately py313 even though the runtime is 3.14: the py314 target makes
+# `ruff format` rewrite `except (A, B):` to the PEP 758 unparenthesized form,
+# which is pointless churn and unreadable to pre-3.14 tooling.
 target-version = "py313"
 
 [tool.ruff.lint]

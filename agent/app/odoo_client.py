@@ -155,12 +155,18 @@ class OdooClient:
         )
 
     async def apply_inventory_patch(
-        self, product_id: int, counted_qty: float, location_id=None, reason=None
+        self, product_id: int, counted_qty: float, location_id=None, reason=None, task_id=None
     ) -> Any:
+        """Adjust Odoo's on-hand quantity.
+
+        ``task_id`` must reference the approved ``ai.ops.task``: Odoo enforces a
+        server-side approval gate on the agent's write paths.
+        """
         return await self.execute_kw(
             "ai.ops.inventory",
             "apply_inventory_patch",
             [product_id, counted_qty, location_id, reason],
+            {"task_id": task_id},
         )
 
     async def discrepancy_context(self, product_id: int, fetch_shopify: bool = True) -> Any:
@@ -171,10 +177,17 @@ class OdooClient:
             [product_id, fetch_shopify],
         )
 
-    async def push_inventory_to_shopify(self, product_id: int, qty: float, reason=None) -> Any:
-        """Correct Shopify's available quantity from Odoo (Odoo is source of truth)."""
+    async def push_inventory_to_shopify(
+        self, product_id: int, qty: float, reason=None, task_id=None
+    ) -> Any:
+        """Correct Shopify's available quantity from Odoo (Odoo is source of truth).
+
+        ``task_id`` must reference the approved ``ai.ops.task`` (server-side
+        approval gate, same as :meth:`apply_inventory_patch`).
+        """
         return await self.execute_kw(
             "ai.ops.inventory",
             "push_inventory_to_shopify",
             [product_id, qty, reason],
+            {"task_id": task_id},
         )

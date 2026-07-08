@@ -44,6 +44,13 @@ resource "aws_ecs_service" "langfuse" {
     weight            = 100
   }
 
+  # Abort + roll back a failing rollout instead of cycling tasks indefinitely.
+  # (Distinct from Spot reclamation, which ECS replaces normally.)
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
   network_configuration {
     subnets          = var.private_subnet_ids
     security_groups  = [var.langfuse_sg_id]

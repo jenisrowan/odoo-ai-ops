@@ -85,7 +85,27 @@ def test_base64_encoded_body(mock_sqs):
 
 
 # --- Slack -----------------------------------------------------------------
-def test_slack_url_verification_challenge(mock_sqs):
+def test_slack_url_verification_challenge_signed(mock_sqs):
+    body = json.dumps({"type": "url_verification", "challenge": "abc123"})
+    ts = str(int(time.time()))
+    event = {
+        "pathParameters": {"source": "slack"},
+        "headers": {
+            "content-type": "application/json",
+            "x-slack-request-timestamp": ts,
+            "x-slack-signature": _slack_sig(body, ts),
+        },
+        "body": body,
+    }
+    resp = handler.lambda_handler(event, None)
+    assert resp["statusCode"] == 200
+    assert json.loads(resp["body"])["challenge"] == "abc123"
+    mock_sqs.send_message.assert_not_called()
+
+
+def test_slack_url_verification_unsigned_rejected_when_secret_set(mock_sqs):
+    # Slack signs url_verification requests; with a signing secret configured
+    # an unsigned challenge must be rejected (no unauthenticated echo).
     body = json.dumps({"type": "url_verification", "challenge": "abc123"})
     event = {
         "pathParameters": {"source": "slack"},
@@ -93,8 +113,7 @@ def test_slack_url_verification_challenge(mock_sqs):
         "body": body,
     }
     resp = handler.lambda_handler(event, None)
-    assert resp["statusCode"] == 200
-    assert json.loads(resp["body"])["challenge"] == "abc123"
+    assert resp["statusCode"] == 401
     mock_sqs.send_message.assert_not_called()
 
 

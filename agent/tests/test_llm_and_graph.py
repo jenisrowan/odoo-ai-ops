@@ -115,4 +115,11 @@ async def test_reconciliation_diagnoses_and_pushes_to_shopify(monkeypatch):
     # approving an "update_shopify" diagnosis pushes Odoo's on-hand to Shopify
     await rt.resume("rc-test", decision="approve", manager_name="Dana")
     rt.odoo_client.push_inventory_to_shopify.assert_awaited()
-    assert rt.odoo_client.push_inventory_to_shopify.await_args.kwargs["qty"] == 10.0
+    push_kwargs = rt.odoo_client.push_inventory_to_shopify.await_args.kwargs
+    assert push_kwargs["qty"] == 10.0
+    # The write must reference the task so Odoo's approval gate can verify it,
+    # and the decision must have been persisted BEFORE the write (the gate
+    # checks the recorded decision).
+    assert push_kwargs["task_id"] == 7
+    rt.odoo_client.set_approval.assert_awaited()
+    assert rt.odoo_client.set_approval.await_args.kwargs["decision"] == "approve"

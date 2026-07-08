@@ -24,7 +24,7 @@ def _resp(json_data, status=200):
 @tagged("post_install", "-at_install", "ai_ops")
 class TestShopifyClient(TransactionCase):
     def _client(self):
-        return ShopifyClient(shop_domain="test.myshopify.com", admin_token="tok", api_version="2025-01")
+        return ShopifyClient(shop_domain="test.myshopify.com", admin_token="tok", api_version="2026-07")
 
     @patch(_PATH)
     def test_cancel_order_normalizes_gid_and_returns_job(self, mock_post):
@@ -40,6 +40,9 @@ class TestShopifyClient(TransactionCase):
         sent = mock_post.call_args.kwargs["json"]["variables"]
         self.assertEqual(sent["orderId"], "gid://shopify/Order/12345")
         self.assertEqual(sent["reason"], "FRAUD")
+        # Refunding is an explicit opt-in; a fraud cancellation must not
+        # auto-refund by default.
+        self.assertFalse(sent["refund"])
 
     @patch(_PATH)
     def test_cancel_order_user_error_raises(self, mock_post):

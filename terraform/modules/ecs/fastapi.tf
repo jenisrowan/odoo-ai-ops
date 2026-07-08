@@ -179,6 +179,12 @@ resource "aws_ecs_service" "fastapi" {
   deployment_minimum_healthy_percent = 50
   deployment_maximum_percent         = 200
 
+  # Abort + roll back a failing rollout instead of cycling tasks indefinitely.
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
   network_configuration {
     subnets         = var.private_subnet_ids
     security_groups = [var.fastapi_sg_id]

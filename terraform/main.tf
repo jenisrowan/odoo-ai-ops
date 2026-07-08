@@ -60,6 +60,9 @@ module "edge" {
   alb_https_sg_id   = module.security.alb_https_sg_id
   # Webhooks enter through the same edge (WAF + CloudFront) -> API Gateway.
   webhook_api_host = module.webhooks.api_host
+  # Optional TLS for the CloudFront -> ALB origin hop (requires a custom domain).
+  alb_origin_domain_name  = var.alb_origin_domain_name
+  alb_acm_certificate_arn = var.alb_acm_certificate_arn
 }
 
 module "webhooks" {
@@ -92,9 +95,10 @@ module "ecs" {
 
   target_group_arn = module.edge.target_group_arn
 
-  odoo_image_url    = var.odoo_image_url
-  nginx_image_url   = var.nginx_image_url
-  fastapi_image_url = var.fastapi_image_url
+  odoo_image_url  = var.odoo_image_url
+  nginx_image_url = var.nginx_image_url
+  # Deploy passes an explicit :<sha> image; empty falls back to the ECR repo.
+  fastapi_image_url = var.fastapi_image_url != "" ? var.fastapi_image_url : "${module.ecr.fastapi_repo_url}:latest"
 
   db_master_secret_arn   = module.data.db_master_secret_arn
   admin_secret_arn       = data.aws_secretsmanager_secret.odoo_admin_passwd.arn

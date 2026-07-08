@@ -2,6 +2,13 @@
 # Direct ALB access is blocked; only CloudFront (which injects a shared secret
 # header) may reach the origin.
 
+locals {
+  # CloudFront -> ALB over TLS requires a custom origin domain with a matching
+  # ACM certificate (see the variable docs); with both provided the HTTPS
+  # listener is created and the origin switches to https-only.
+  https_origin = var.alb_origin_domain_name != "" && var.alb_acm_certificate_arn != ""
+}
+
 resource "random_password" "cf_secret" {
   length  = 32
   special = false
@@ -51,6 +58,47 @@ resource "aws_lb_listener" "http" {
 
 resource "aws_lb_listener_rule" "allow_cloudfront_secret" {
   listener_arn = aws_lb_listener.http.arn
+  priority     = 100
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.odoo.arn
+  }
+
+  condition {
+    http_header {
+      http_header_name = "X-Odoo-Origin-Verify"
+      values           = [random_password.cf_secret.result]
+    }
+  }
+}
+
+# HTTPS listener - only when a custom origin domain + ACM certificate are
+# provided (see variables). Same deny-by-default + origin-secret rule as HTTP.
+resource "aws_lb_listener" "https" {
+  count = local.https_origin ? 1 : 0
+
+  load_balancer_arn = aws_lb.main.arn
+  port              = 443
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+  certificate_arn   = var.alb_acm_certificate_arn
+
+  default_action {
+    type = "fixed-response"
+
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "Access Denied - Please use the official CloudFront URL"
+      status_code  = "403"
+    }
+  }
+}
+
+resource "aws_lb_listener_rule" "allow_cloudfront_secret_https" {
+  count = local.https_origin ? 1 : 0
+
+  listener_arn = aws_lb_listener.https[0].arn
   priority     = 100
 
   action {
@@ -132,13 +180,16 @@ resource "aws_cloudfront_origin_request_policy" "odoo_forward_host" {
 
 resource "aws_cloudfront_distribution" "odoo" {
   origin {
-    domain_name = aws_lb.main.dns_name
+    # With a custom origin domain + certificate the CloudFront->ALB hop is TLS;
+    # otherwise it falls back to the ALB's default DNS name over HTTP (see
+    # alb_origin_domain_name variable docs for why).
+    domain_name = local.https_origin ? var.alb_origin_domain_name : aws_lb.main.dns_name
     origin_id   = "alb-origin"
 
     custom_origin_config {
       http_port              = 80
       https_port             = 443
-      origin_protocol_policy = "http-only"
+      origin_protocol_policy = local.https_origin ? "https-only" : "http-only"
       origin_ssl_protocols   = ["TLSv1.2"]
       origin_read_timeout    = 60
     }

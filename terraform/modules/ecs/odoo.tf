@@ -101,7 +101,7 @@ resource "aws_ecs_task_definition" "odoo" {
     redis_port             = var.valkey_port
     integration_secret_arn = var.integration_secret_arn
     agent_base_url         = "http://fastapi:8000"
-    shopify_api_version    = "2025-01"
+    shopify_api_version    = "2026-07"
   })
 
   volume {
@@ -136,6 +136,14 @@ resource "aws_ecs_service" "odoo" {
 
   deployment_minimum_healthy_percent = 0
   deployment_maximum_percent         = 100
+
+  # Stop a bad task definition (crash/health-check failure) from cycling tasks
+  # forever: ECS aborts the rollout after the failure threshold and rolls back
+  # to the last stable deployment instead of endless create/replace.
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
 
   network_configuration {
     subnets         = var.private_subnet_ids

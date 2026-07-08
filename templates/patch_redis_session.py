@@ -42,7 +42,7 @@ code = code.replace(
 )
 
 init_file.write_text(code)
-print(f"  ✓ Patched {init_file}")
+print(f"  Patched {init_file}")
 
 # --- Patch redis_config.py ---
 config_file = ADDON_DIR / "redis_config.py"
@@ -55,7 +55,7 @@ code = code.replace(
 )
 
 config_file.write_text(code)
-print(f"  ✓ Patched {config_file}")
+print(f"  Patched {config_file}")
 
 # --- Patch redis_session.py ---
 session_file = ADDON_DIR / "redis_session.py"
@@ -86,6 +86,6 @@ code = code.replace(
 )
 
 session_file.write_text(code)
-print(f"  ✓ Patched {session_file}")
+print(f"  Patched {session_file}")
 
 print("All Odoo 19 patches applied successfully.")

@@ -224,4 +224,6 @@ __marimo__/
 *.tfstate.backup
 
 *.tfvars
-.terraform.lock.hcl
+
+# .terraform.lock.hcl IS committed (provider checksum lock — HashiCorp's
+# recommended practice for reproducible provider versions across machines/CI).

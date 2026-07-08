@@ -55,6 +55,40 @@ _graceful_shutdown() {
 trap '_graceful_shutdown' SIGTERM SIGINT
 
 # ---------------------------------------------------------------------------
+# Master (super-admin) password.
+# Odoo's config default for admin_passwd is the well-known string 'admin', and
+# the upstream entrypoint only maps the DB env vars (HOST/PORT/USER/PASSWORD) -
+# it never consumes ODOO_ADMIN_PASSWD. Left unset, the JSON-RPC 'db' service
+# (create/drop/dump) would accept master password 'admin' even with
+# list_db = False. Write the injected secret into odoo.conf as a pbkdf2 hash
+# so neither the default nor a plaintext copy survives on disk.
+# ---------------------------------------------------------------------------
+if [ -n "${ODOO_ADMIN_PASSWD:-}" ]; then
+    echo "[entrypoint] Setting admin_passwd from ODOO_ADMIN_PASSWD (hashed)."
+    python3 - <<'PYEOF'
+import os
+from passlib.context import CryptContext
+
+conf = "/etc/odoo/odoo.conf"
+hashed = CryptContext(schemes=["pbkdf2_sha512"]).hash(os.environ["ODOO_ADMIN_PASSWD"])
+with open(conf) as fh:
+    lines = fh.readlines()
+lines = [line for line in lines if not line.strip().startswith("admin_passwd")]
+for i, line in enumerate(lines):
+    if line.strip() == "[options]":
+        lines.insert(i + 1, f"admin_passwd = {hashed}\n")
+        break
+else:
+    raise SystemExit("odoo.conf has no [options] section")
+with open(conf, "w") as fh:
+    fh.writelines(lines)
+PYEOF
+else
+    echo "[entrypoint] WARNING: ODOO_ADMIN_PASSWD is not set - the master" \
+         "password stays at Odoo's default; database RPC is NOT secured."
+fi
+
+# ---------------------------------------------------------------------------
 # Start Odoo via the upstream image entrypoint.
 # We run it in the background so this script (PID 1) remains the signal target.
 # The upstream /entrypoint.sh honours all env vars (HOST, PORT, USER, PASSWORD, …)

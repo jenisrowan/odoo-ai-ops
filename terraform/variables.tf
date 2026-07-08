@@ -47,9 +47,14 @@ variable "odoo_image_url" {
 }
 
 variable "fastapi_image_url" {
-  description = "The full ECR URL and tag for the FastAPI + LangGraph agent image"
+  description = <<-EOT
+    The full ECR URL and tag for the FastAPI + LangGraph agent image. The
+    deploy workflow always passes this explicitly (:<git sha>); when left
+    empty (e.g. terraform test) it falls back to the fastapi-agent ECR
+    repository's :latest tag instead of an unrelated placeholder image.
+  EOT
   type        = string
-  default     = "public.ecr.aws/docker/library/python:3.12-slim"
+  default     = ""
 }
 
 variable "clickhouse_image_url" {
@@ -104,4 +109,21 @@ variable "model_high" {
   description = "Anthropic model id used for high-risk deep analysis."
   type        = string
   default     = "claude-sonnet-5"
+}
+
+variable "alb_origin_domain_name" {
+  description = <<-EOT
+    Optional custom domain that resolves to the ALB and is covered by
+    alb_acm_certificate_arn. Set both to upgrade the CloudFront->ALB origin
+    hop to HTTPS; empty keeps the domainless HTTP origin (see the edge module
+    variable docs for the trade-off).
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "alb_acm_certificate_arn" {
+  description = "ACM certificate ARN for the ALB HTTPS listener; must cover alb_origin_domain_name."
+  type        = string
+  default     = ""
 }

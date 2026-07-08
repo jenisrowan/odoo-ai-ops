@@ -39,6 +39,10 @@
                         </setting>
                     </block>
                     <block title="Shopify" name="ai_ops_shopify">
+                        <setting string="Refund on Cancellation"
+                                 help="Also refund the payment when AI Ops cancels an order in Shopify. Off by default: fraud rejections usually should not auto-refund.">
+                            <field name="ai_ops_refund_on_cancel"/>
+                        </setting>
                         <setting string="Shopify Admin API" help="Used to cancel/reject orders directly.">
                             <div class="content-group">
                                 <div class="row">

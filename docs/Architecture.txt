@@ -63,7 +63,7 @@
        +-------------------------------------------------------------+
        |                  External API Integration                   |
        |-------------------------------------------------------------|
-       | • [ Anthropic API ] (Claude 4.6 Engine)                     |
+       | • [ Anthropic API ] (claude-sonnet-5 / claude-haiku-4-5)    |
        | • [ Shopify API ]                                           |
        | • [ Slack API ] (Interactive Alerts & Approvals)            |
        +-------------------------------------------------------------+

@@ -22,7 +22,7 @@ jobs:
     name: Lint & format (ruff)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v6
         with:
@@ -53,7 +53,7 @@ jobs:
       run:
         working-directory: agent
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v6
         with:
@@ -74,7 +74,7 @@ jobs:
     name: Lambda tests (pytest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v6
         with:
@@ -107,7 +107,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Install & test the module inside the Odoo 19 image
         # DB config is passed via the HOST/PORT/USER/PASSWORD env vars the Odoo
@@ -134,9 +134,11 @@ jobs:
       run:
         working-directory: terraform
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.15.7"
 
       - name: Format check
         run: terraform fmt -check -recursive

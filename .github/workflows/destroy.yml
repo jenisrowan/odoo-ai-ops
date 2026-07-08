@@ -28,6 +28,8 @@ jobs:
 
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v4
+      with:
+        terraform_version: "1.15.7"
 
     - name: Terraform Init
       working-directory: ./terraform
@@ -40,6 +42,17 @@ jobs:
     # All image vars have defaults, so none are needed for a destroy.
     # CloudFront (~20 min to delete) dominates the wall-clock; everything
     # expensive (RDS, ElastiCache, ECS, NAT, EBS) is gone within a few minutes.
+    - name: Retain CloudWatch Logs
+      working-directory: ./terraform
+      run: |
+        # Remove log groups from Terraform state so they survive the destroy
+        terraform state rm module.ecs.aws_cloudwatch_log_group.odoo_logs || true
+        terraform state rm module.ecs.aws_cloudwatch_log_group.fastapi_logs || true
+        terraform state rm module.telemetry.aws_cloudwatch_log_group.clickhouse || true
+        terraform state rm module.telemetry.aws_cloudwatch_log_group.langfuse || true
+        terraform state rm module.webhooks.aws_cloudwatch_log_group.webhook_lambda || true
+        terraform state rm module.webhooks.aws_cloudwatch_log_group.apigw_access || true
+
     - name: Terraform Destroy
       working-directory: ./terraform
       run: |

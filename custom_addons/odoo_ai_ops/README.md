@@ -39,7 +39,7 @@ so secrets never need to be stored in the database):
 | `odoo_ai_ops.shared_token` | `AI_OPS_SHARED_TOKEN` | bearer shared with the agent |
 | `odoo_ai_ops.shopify_shop_domain` | `SHOPIFY_SHOP_DOMAIN` | `my-store.myshopify.com` |
 | `odoo_ai_ops.shopify_admin_token` | `SHOPIFY_ADMIN_TOKEN` | Shopify Admin API token |
-| `odoo_ai_ops.shopify_api_version` | `SHOPIFY_API_VERSION` | default `2025-01` |
+| `odoo_ai_ops.shopify_api_version` | `SHOPIFY_API_VERSION` | default `2026-07` |
 | `odoo_ai_ops.bypass_threshold` | - | default `10.0` |
 | `odoo_ai_ops.auto_reject_enabled` | - | default `True` |
 

@@ -103,7 +103,20 @@ class AiOpsTask(models.Model):
         tracking=True,
         copy=False,
     )
-    approver_id = fields.Many2one("res.users", string="Approved/Rejected By", copy=False)
+    approver_id = fields.Many2one(
+        "res.users",
+        string="Approved/Rejected By",
+        copy=False,
+        help="Only set when the decision was made by an Odoo user directly. "
+        "Decisions relayed from Slack by the agent record the manager in "
+        "'Approver Name' instead (the agent's technical user is not the approver).",
+    )
+    approver_name = fields.Char(
+        string="Approver Name",
+        copy=False,
+        tracking=True,
+        help="Display name of the manager who decided (e.g. the Slack user), as relayed by the agent.",
+    )
     approval_date = fields.Datetime(string="Decision Date", copy=False)
     company_id = fields.Many2one("res.company", default=lambda self: self.env.company, required=True)
 
@@ -137,7 +150,7 @@ class AiOpsTask(models.Model):
         return ShopifyClient(
             shop_domain=self._get_param("odoo_ai_ops.shopify_shop_domain"),
             admin_token=self._get_param("odoo_ai_ops.shopify_admin_token"),
-            api_version=self._get_param("odoo_ai_ops.shopify_api_version", "2025-01"),
+            api_version=self._get_param("odoo_ai_ops.shopify_api_version", "2026-07"),
         )
 
     # ------------------------------------------------------------------
@@ -266,9 +279,14 @@ class AiOpsTask(models.Model):
         vals = {
             "decision": decision,
             "approval_date": fields.Datetime.now(),
-            "approver_id": self.env.user.id,
+            "approver_name": manager_name or self.env.user.name,
             "state": "approved" if decision == "approve" else "rejected",
         }
+        # Attribute approver_id only to real Odoo users. When the call arrives
+        # over JSON-RPC from the agent's technical user, the decision maker is
+        # the (Slack) manager in ``approver_name``, not the integration account.
+        if not self.env.user.has_group("odoo_ai_ops.group_ai_ops_agent"):
+            vals["approver_id"] = self.env.user.id
         if run_id:
             vals["agent_run_id"] = run_id
         self.write(vals)
@@ -308,8 +326,16 @@ class AiOpsTask(models.Model):
         self.ensure_one()
         if not self.shopify_order_id:
             return False
+        # Refunding on cancellation is an explicit opt-in: auto-refunding a
+        # fraud rejection is usually wrong (void/review the payment instead).
+        refund = str(self._get_param("odoo_ai_ops.refund_on_cancel", "False")).strip().lower() in (
+            "true",
+            "1",
+        )
         try:
-            self._shopify_client().cancel_order(self.shopify_order_id, reason=reason, staff_note=staff_note)
+            self._shopify_client().cancel_order(
+                self.shopify_order_id, reason=reason, refund=refund, staff_note=staff_note
+            )
         except ShopifyError as exc:
             _logger.exception("AI Ops: Shopify cancel failed for %s", self.name)
             self.message_post(body=_("Shopify cancellation FAILED: %s", exc))

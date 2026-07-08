@@ -88,7 +88,7 @@ class ShopifyClient:
             raise ShopifyError("Shopify credentials are not configured.")
         self.shop_domain = shop_domain.replace("https://", "").replace("http://", "").strip("/")
         self.admin_token = admin_token
-        self.api_version = api_version or "2025-01"
+        self.api_version = api_version or "2026-07"
         self.timeout = timeout
 
     @property
@@ -126,11 +126,17 @@ class ShopifyClient:
             raise ShopifyError("Shopify GraphQL errors: %s" % body["errors"])
         return body.get("data", {})
 
-    def cancel_order(self, order_id, reason="FRAUD", refund=True, restock=True, staff_note=None):
+    def cancel_order(self, order_id, reason="FRAUD", refund=False, restock=True, staff_note=None):
         """Cancel an order in Shopify. Returns the job handle on success.
 
         :param reason: One of Shopify's ``OrderCancelReason`` enum values
                        (CUSTOMER, FRAUD, INVENTORY, DECLINED, STAFF, OTHER).
+        :param refund: Whether Shopify should refund the payment as part of the
+                       cancellation. Defaults to ``False``: on a fraud rejection
+                       an automatic refund is usually NOT wanted (the payment
+                       should be voided/reviewed per the store's fraud process),
+                       so refunding is an explicit opt-in
+                       (``odoo_ai_ops.refund_on_cancel``).
         """
         data = self._execute(
             _ORDER_CANCEL_MUTATION,

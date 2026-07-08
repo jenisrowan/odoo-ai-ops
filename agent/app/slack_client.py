@@ -72,7 +72,7 @@ class SlackClient:
         return [
             {
                 "type": "header",
-                "text": {"type": "plain_text", "text": f"🛡️ Fraud Review - {order_name}"},
+                "text": {"type": "plain_text", "text": f"Fraud Review - {order_name}"},
             },
             {
                 "type": "section",
@@ -92,14 +92,14 @@ class SlackClient:
                         "type": "button",
                         "style": "primary",
                         "action_id": "ai_ops_approve",
-                        "text": {"type": "plain_text", "text": "✅ Approve Order"},
+                        "text": {"type": "plain_text", "text": "Approve Order"},
                         "value": ctx,
                     },
                     {
                         "type": "button",
                         "style": "danger",
                         "action_id": "ai_ops_reject",
-                        "text": {"type": "plain_text", "text": "⛔ Reject & Cancel"},
+                        "text": {"type": "plain_text", "text": "Reject & Cancel"},
                         "value": ctx,
                         "confirm": {
                             "title": {"type": "plain_text", "text": "Cancel this order?"},

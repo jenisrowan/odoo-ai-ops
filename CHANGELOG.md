@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Modularized the Terraform** from a flat layout into `modules/` (network, security, data, ecr, iam, edge, webhooks, ecs, telemetry) composed by the root `main.tf`, with `moved.tf` for safe, in-place state migration.
 - **Switched all compute to the exact Graviton instances from the docs and made the whole cluster arm64**: Odoo `c6g.xlarge`, PgBouncer `m6g.medium`, FastAPI `m6g.large`, ClickHouse `r6g.xlarge`, primary RDS `db.m6g.xlarge` (Multi-AZ), Langfuse RDS `db.t4g.small`; every image is built `linux/arm64` and task CPU/memory resized to fit.
-- **Pinned agent dependencies for production** (no floating tags): `langgraph==1.2.6`, `langchain-anthropic==1.4.8`, `langchain-core==1.4.8`, `fastapi==0.138.0`, `anthropic==0.112.0`, `langfuse==4.12.0`.
+- **Pinned agent dependencies for production**: `langgraph==1.2.6`, `langchain-anthropic==1.4.8`, `langchain-core==1.4.8`, `fastapi==0.138.0`, `anthropic==0.112.0`, `langfuse==4.12.0`.
 - **Upgraded the runtime to Python 3.14** across the agent (`requires-python>=3.14`, `python:3.14-slim-bookworm` image), the webhook Lambda (`python3.14`), and all CI jobs.
 - **Bumped GitHub Actions to Node 24 versions** (`actions/checkout@v5`, `actions/setup-python@v6`) to clear the Node 20 deprecation warnings.
 - Production hardening of the Terraform: `default_tags`, `locals`/`variables`, dedicated least-privilege IAM roles, and Secrets Manager bindings for the Odoo and FastAPI tasks.
