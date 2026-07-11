@@ -55,15 +55,26 @@ _graceful_shutdown() {
 trap '_graceful_shutdown' SIGTERM SIGINT
 
 # ---------------------------------------------------------------------------
-# Master (super-admin) password.
+# Master (super-admin) password — FAIL CLOSED.
 # Odoo's config default for admin_passwd is the well-known string 'admin', and
 # the upstream entrypoint only maps the DB env vars (HOST/PORT/USER/PASSWORD) -
-# it never consumes ODOO_ADMIN_PASSWD. Left unset, the JSON-RPC 'db' service
-# (create/drop/dump) would accept master password 'admin' even with
-# list_db = False. Write the injected secret into odoo.conf as a pbkdf2 hash
-# so neither the default nor a plaintext copy survives on disk.
+# it never consumes ODOO_ADMIN_PASSWD. A weak/default master password exposes
+# the JSON-RPC 'db' service (create/drop/dump) even with list_db = False, so we
+# REFUSE to boot rather than fall back to 'admin':
+#   * value == 'admin'                  -> fatal (the insecure default).
+#   * unset/empty and not ODOO_STAGE=dev -> fatal (prod must inject the secret).
+#   * unset/empty and ODOO_STAGE=dev     -> allowed; local dev uses the
+#                                           admin_passwd baked into dev.conf.
+# In production ODOO_ADMIN_PASSWD is injected from the odoo/admin/password
+# secret; a hard exit here is caught by the ECS deployment circuit breaker,
+# which aborts + rolls back the deploy (no crash-loop). The value is written
+# into odoo.conf as a salted pbkdf2 hash so no plaintext copy survives on disk.
 # ---------------------------------------------------------------------------
-if [ -n "${ODOO_ADMIN_PASSWD:-}" ]; then
+if [ "${ODOO_ADMIN_PASSWD:-}" = "admin" ]; then
+    echo "[entrypoint] FATAL: ODOO_ADMIN_PASSWD is set to Odoo's insecure default 'admin'." >&2
+    echo "[entrypoint] Put a strong value in the odoo/admin/password secret. Refusing to start." >&2
+    exit 1
+elif [ -n "${ODOO_ADMIN_PASSWD:-}" ]; then
     echo "[entrypoint] Setting admin_passwd from ODOO_ADMIN_PASSWD (hashed)."
     python3 - <<'PYEOF'
 import os
@@ -83,9 +94,15 @@ else:
 with open(conf, "w") as fh:
     fh.writelines(lines)
 PYEOF
+elif [ "${ODOO_STAGE:-}" = "dev" ]; then
+    echo "[entrypoint] ODOO_STAGE=dev and ODOO_ADMIN_PASSWD unset: using the" \
+         "config's admin_passwd as-is (LOCAL DEVELOPMENT ONLY)."
 else
-    echo "[entrypoint] WARNING: ODOO_ADMIN_PASSWD is not set - the master" \
-         "password stays at Odoo's default; database RPC is NOT secured."
+    echo "[entrypoint] FATAL: ODOO_ADMIN_PASSWD is not set. Refusing to start with" >&2
+    echo "[entrypoint] Odoo's insecure 'admin' default master password. Ensure the" >&2
+    echo "[entrypoint] odoo/admin/password secret is injected (set ODOO_STAGE=dev for" >&2
+    echo "[entrypoint] local development)." >&2
+    exit 1
 fi
 
 # ---------------------------------------------------------------------------
