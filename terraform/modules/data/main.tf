@@ -78,10 +78,11 @@ resource "aws_efs_access_point" "odoo" {
 }
 
 # --- ElastiCache Serverless (Valkey) ---
+# Engine version 9 is required
 resource "aws_elasticache_serverless_cache" "valkey" {
   name                 = "${var.name_prefix}-valkey-serverless"
   engine               = "valkey"
-  major_engine_version = "8"
+  major_engine_version = "9"
   subnet_ids           = var.private_subnet_ids
   security_group_ids   = [var.valkey_sg_id]
 

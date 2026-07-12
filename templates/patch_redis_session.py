@@ -24,6 +24,10 @@ code = code.replace(
     'odoo.tools.config["server_wide_modules"]',
 )
 
+# 1.5 Replace deprecated lazy_property with functools.cached_property
+code = "import functools\n" + code
+code = code.replace("odoo.tools.func.lazy_property", "functools.cached_property")
+
 # 2. Fix Python 3.12 `cached_property` monkey-patching and cached instance
 # When `session_store` is attached to the class dynamically, Python 3.12 requires
 # __set_name__ to be called manually or `attrname` & `lock` to be populated.

@@ -5,14 +5,18 @@ thread* to save compute (per the architecture). Its full state graph is
 serialized to Valkey so that - possibly minutes or hours later, in a different
 ECS task - the SQS resume worker can rehydrate and continue it.
 
-We use the official ``langgraph-checkpoint-redis`` saver (Valkey is wire
-compatible with Redis OSS). If no Valkey URL is configured (e.g. local unit
+We use the official ``langgraph-checkpoint-redis`` saver. It is NOT a plain
+key-value client: ``asetup()`` and checkpoint writes require the search
+(``FT.*``) and json (``JSON.*``) modules. These are built into ElastiCache
+version 9+ for Valkey (not 8). If no Valkey URL is configured (e.g. local unit
 tests) we fall back to an in-memory saver and log a clear warning.
 """
 
 from __future__ import annotations
 
 import logging
+
+from langgraph.checkpoint.memory import MemorySaver
 
 logger = logging.getLogger(__name__)
 
@@ -25,23 +29,13 @@ async def build_checkpointer(valkey_url: str):
     :func:`close_checkpointer` on shutdown.
     """
     if not valkey_url:
-        from langgraph.checkpoint.memory import MemorySaver
-
         logger.warning(
             "VALKEY_URL not set - using in-memory checkpointer "
             "(state will NOT survive restarts). Do not use in production."
         )
         return MemorySaver(), None
 
-    try:
-        from langgraph.checkpoint.redis.aio import AsyncRedisSaver
-    except ImportError:  # pragma: no cover - dependency guard
-        from langgraph.checkpoint.memory import MemorySaver
-
-        logger.error(
-            "langgraph-checkpoint-redis not installed - falling back to in-memory checkpointer."
-        )
-        return MemorySaver(), None
+    from langgraph.checkpoint.redis.aio import AsyncRedisSaver
 
     cm = AsyncRedisSaver.from_conn_string(valkey_url)
     saver = await cm.__aenter__()
