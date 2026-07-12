@@ -12,6 +12,7 @@ services:
     build:
       context: .
       dockerfile: templates/Dockerfile.odoo
+    env_file: .env
     depends_on:
       - db
       - redis
@@ -52,9 +53,11 @@ services:
     volumes:
       - db-data:/var/lib/postgresql/data
 
-  # Valkey-compatible cache (LangGraph checkpoints + Odoo sessions locally).
+  # Local stand-in for ElastiCache Serverless (Valkey 9). Must be the *bundle*
+  # image: the LangGraph checkpointer (langgraph-checkpoint-redis) needs the
+  # search (FT.*) and json (JSON.*) modules for asetup()/checkpointing.
   redis:
-    image: redis:7-alpine
+    image: valkey/valkey-bundle:9.1.0
     ports:
       - "6379:6379"
 
@@ -65,6 +68,7 @@ services:
     build:
       context: .
       dockerfile: templates/Dockerfile.fastapi
+    env_file: .env
     depends_on:
       - web
       - redis
@@ -82,7 +86,130 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - MODEL_MEDIUM=claude-haiku-4-5-20251001
       - MODEL_HIGH=claude-sonnet-5
+      - LANGFUSE_HOST=http://langfuse-web:3000
+
+  # --- Local Telemetry Stack (Mirroring Production AWS ECS + ClickHouse + S3) ---
+
+  # 1. MinIO (Local S3 Alternative for Langfuse uploads & ClickHouse tiered storage)
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+  # 1b. Setup container to create the events-bucket on startup
+  minio-setup:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 2;
+      /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin;
+      /usr/bin/mc mb -p myminio/events-bucket;
+      exit 0;
+      "
+
+  # 2. ClickHouse Analytical DB (using exact prod storage.xml config)
+  clickhouse:
+    build:
+      context: .
+      dockerfile: templates/Dockerfile.clickhouse
+    depends_on:
+      minio-setup:
+        condition: service_started
+    ports:
+      - "8123:8123"
+      - "9440:9000"
+    environment:
+      # Inject AWS credentials into env so ClickHouse <use_environment_credentials> picks them up
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+      - AWS_DEFAULT_REGION=us-east-1
+      # Local endpoint override used by storage.xml
+      - CLICKHOUSE_S3_ENDPOINT=http://minio:9000/events-bucket/clickhouse/
+      - CLICKHOUSE_S3_REGION=us-east-1
+      - CLICKHOUSE_PASSWORD=clickhouse
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+
+  # 3. Langfuse Web
+  langfuse-web:
+    image: ghcr.io/langfuse/langfuse:3
+    depends_on:
+      - db
+      - clickhouse
+      - minio-setup
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://odoo:odoo@db:5432/postgres
+      - NEXTAUTH_URL=http://localhost:3000
+      - NEXTAUTH_SECRET=local_secret_key_only
+      - SALT=local_salt_key_only
+      - TELEMETRY_ENABLED=false
+      - CLICKHOUSE_URL=http://clickhouse:8123
+      - CLICKHOUSE_MIGRATION_URL=clickhouse://clickhouse:9000
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=clickhouse
+      - CLICKHOUSE_CLUSTER_ENABLED=false
+      - REDIS_CONNECTION_STRING=redis://redis:6379
+      - LANGFUSE_S3_EVENT_UPLOAD_ENABLED=true
+      - LANGFUSE_S3_EVENT_UPLOAD_BUCKET=events-bucket
+      - LANGFUSE_S3_EVENT_UPLOAD_REGION=us-east-1
+      - LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT=http://minio:9000
+      - LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=minioadmin
+      - LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=minioadmin
+      - LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE=true
+      - LANGFUSE_S3_MEDIA_UPLOAD_ENABLED=true
+      - LANGFUSE_S3_MEDIA_UPLOAD_BUCKET=events-bucket
+      - LANGFUSE_S3_MEDIA_UPLOAD_REGION=us-east-1
+      - LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT=http://minio:9000
+      - LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID=minioadmin
+      - LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY=minioadmin
+      - LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE=true
+
+  # 4. Langfuse Worker
+  langfuse-worker:
+    image: ghcr.io/langfuse/langfuse-worker:3
+    depends_on:
+      - db
+      - clickhouse
+      - langfuse-web
+      - minio-setup
+    environment:
+      - DATABASE_URL=postgresql://odoo:odoo@db:5432/postgres
+      - SALT=local_salt_key_only
+      - TELEMETRY_ENABLED=false
+      - CLICKHOUSE_URL=http://clickhouse:8123
+      - CLICKHOUSE_MIGRATION_URL=clickhouse://clickhouse:9000
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=clickhouse
+      - CLICKHOUSE_CLUSTER_ENABLED=false
+      - REDIS_CONNECTION_STRING=redis://redis:6379
+      - LANGFUSE_S3_EVENT_UPLOAD_ENABLED=true
+      - LANGFUSE_S3_EVENT_UPLOAD_BUCKET=events-bucket
+      - LANGFUSE_S3_EVENT_UPLOAD_REGION=us-east-1
+      - LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT=http://minio:9000
+      - LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=minioadmin
+      - LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=minioadmin
+      - LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE=true
+      - LANGFUSE_S3_MEDIA_UPLOAD_ENABLED=true
+      - LANGFUSE_S3_MEDIA_UPLOAD_BUCKET=events-bucket
+      - LANGFUSE_S3_MEDIA_UPLOAD_REGION=us-east-1
+      - LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT=http://minio:9000
+      - LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID=minioadmin
+      - LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY=minioadmin
+      - LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE=true
 
 volumes:
   odoo-data:
   db-data:
+  minio-data:
+  clickhouse-data:
