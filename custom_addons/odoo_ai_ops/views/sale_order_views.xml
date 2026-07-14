@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Surface the Shopify / AI Ops context on the sale order form. -->
+    <record id="view_order_form_ai_ops" model="ir.ui.view">
+        <field name="name">sale.order.form.ai.ops</field>
+        <field name="model">sale.order</field>
+        <field name="inherit_id" ref="sale.view_order_form"/>
+        <field name="arch" type="xml">
+
+            <!-- Risk badge in the header, next to the status bar. -->
+            <xpath expr="//header" position="inside">
+                <field name="shopify_risk_level" widget="badge"
+                       invisible="not shopify_risk_level"
+                       decoration-danger="shopify_risk_level == 'high'"
+                       decoration-warning="shopify_risk_level == 'medium'"
+                       decoration-success="shopify_risk_level in ('none', 'low')"/>
+            </xpath>
+
+            <!-- Smart button to the related fraud tasks. -->
+            <xpath expr="//div[@name='button_box']" position="inside">
+                <button name="action_view_ai_ops_tasks" type="object"
+                        class="oe_stat_button" icon="fa-shield"
+                        invisible="ai_ops_task_count == 0">
+                    <field name="ai_ops_task_count" widget="statinfo" string="AI Ops"/>
+                </button>
+            </xpath>
+
+            <!-- Shopify identifiers alongside the other order references. -->
+            <xpath expr="//field[@name='client_order_ref']" position="after">
+                <field name="shopify_order_name" readonly="1"
+                       invisible="not shopify_order_name"/>
+                <field name="shopify_order_id" readonly="1"
+                       invisible="not shopify_order_id"/>
+            </xpath>
+
+            <!-- Full raw payload on its own page (kept verbatim, read-only). -->
+            <xpath expr="//notebook" position="inside">
+                <page string="Shopify Payload" name="shopify_payload"
+                      invisible="not shopify_raw_payload"
+                      groups="odoo_ai_ops.group_ai_ops_manager">
+                    <field name="shopify_raw_payload" readonly="1" nolabel="1"
+                           widget="ace" options="{'mode': 'json'}"/>
+                </page>
+            </xpath>
+
+        </field>
+    </record>
+
+</odoo>

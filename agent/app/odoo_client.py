@@ -98,6 +98,16 @@ class OdooClient:
     # ------------------------------------------------------------------
     # Webhook forwarding (HTTP controller)
     # ------------------------------------------------------------------
+    async def forward_order_create(self, payload: dict) -> dict:
+        """Forward a Shopify ``orders/create`` payload to the Odoo intake."""
+        resp = await self._client.post(
+            f"{self.base_url}/ai_ops/webhook/order_create",
+            json=payload,
+            headers={"X-AI-Ops-Token": self.shared_token},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
     async def forward_order_risk(self, payload: dict) -> dict:
         """Forward a Shopify order-risk payload to the Odoo gatekeeper."""
         resp = await self._client.post(

@@ -36,7 +36,9 @@ agent/
 
 The Shopify webhook **ingress** is *not* an HTTP endpoint here - it arrives via
 SQS (API Gateway -> Lambda -> SQS) and is consumed by the SQS worker, which
-forwards it to Odoo `POST /ai_ops/webhook/order_risk`.
+routes by topic: `orders/create` -> Odoo `POST /ai_ops/webhook/order_create`
+(imports the `sale.order`); `orders/risk_assessment_changed` (or the legacy
+`orders/risk`) -> `POST /ai_ops/webhook/order_risk` (the fraud gatekeeper).
 
 ## Human-in-the-loop
 

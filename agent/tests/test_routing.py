@@ -1,7 +1,7 @@
 """Tests for event routing and Slack helpers (no external services)."""
 
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -36,8 +36,27 @@ async def test_slack_interaction_routes_to_resume():
 async def test_sqs_shopify_message_forwards_to_odoo():
     rt = _runtime()
     rt.forward_webhook = AsyncMock(return_value={"action": "dispatched"})
-    await rt.handle_sqs_message({"source": "shopify", "payload": {"order_id": "1"}})
-    rt.forward_webhook.assert_awaited_once_with({"order_id": "1"})
+    await rt.handle_sqs_message(
+        {"source": "shopify", "topic": "orders/risk_assessment_changed", "payload": {"order_id": "1"}}
+    )
+    rt.forward_webhook.assert_awaited_once_with({"order_id": "1"}, topic="orders/risk_assessment_changed")
+
+
+@pytest.mark.asyncio
+async def test_forward_webhook_routes_by_topic():
+    rt = _runtime()
+    rt.odoo_client = MagicMock()
+    rt.odoo_client.forward_order_create = AsyncMock(return_value={"action": "created"})
+    rt.odoo_client.forward_order_risk = AsyncMock(return_value={"action": "dispatched"})
+
+    # orders/create -> intake endpoint
+    await rt.forward_webhook({"id": "1"}, topic="orders/create")
+    rt.odoo_client.forward_order_create.assert_awaited_once()
+    rt.odoo_client.forward_order_risk.assert_not_called()
+
+    # risk-assessment (and any other topic) -> gatekeeper endpoint
+    await rt.forward_webhook({"id": "2"}, topic="orders/risk_assessment_changed")
+    rt.odoo_client.forward_order_risk.assert_awaited_once()
 
 
 @pytest.mark.asyncio

@@ -67,8 +67,11 @@ The infrastructure is deployed inside a multi-AZ AWS VPC.
 
 ### 1. Autonomous Fraud Detection (Shopify & Slack Integration)
 
-1. **Ingestion:** Shopify's `OrderRisk` webhook sends a payload to AWS API Gateway, which invokes a **Lambda proxy integration** that validates the HMAC signature (and answers Slack's challenge) synchronously and, on success, writes the verified payload to **Amazon SQS**.
-2. **Evaluation:** Odoo workers poll the SQS queue. If the flagged order is very cheap (< $10) and marked with medium or high risk, the system automatically rejects it directly in Shopify (via API). Otherwise, it triggers a LangGraph agent run via REST API.
+This path is driven by **two** Shopify webhooks, because Shopify's fraud analysis is asynchronous — the risk verdict is not available when the order is placed, it arrives once analysis completes (usually seconds, occasionally minutes).
+
+0. **Order intake:** When an order is placed, Shopify's `orders/create` webhook is ingested (same Lambda → SQS path) and Odoo builds a **confirmed `sale.order`**, mapping the customer and line items and storing the full raw payload. Orders now live in Odoo with no separate connector.
+1. **Ingestion:** Later, Shopify's `orders/risk_assessment_changed` webhook sends the risk verdict to AWS API Gateway, which invokes a **Lambda proxy integration** that validates the HMAC signature (and answers Slack's challenge) synchronously and, on success, writes the verified payload to **Amazon SQS**.
+2. **Evaluation:** Odoo workers poll the SQS queue and correlate the verdict back to the imported order (the risk webhook carries no total, so the order total is recovered from the `sale.order`). If the order is very cheap (< $10) and marked medium/high risk, the system auto-rejects it — cancelling it in **both Shopify and Odoo** — without spending LLM tokens. Otherwise, it triggers a LangGraph agent run via REST API.
 3. **Execution & Risk-Triage:**
 * *Medium Risk:* Agent uses **Claude Haiku** for fast, low-cost screening.
 * *High Risk:* Agent uses **Claude Sonnet** to cross-reference IPs, shipping histories, and billing addresses.
@@ -157,9 +160,13 @@ To reduce configuration complexity and minimize costs, this project utilizes a *
    grant it the **AI Ops Agent (Technical)** group. The FastAPI agent authenticates as this user
    over JSON-RPC.
 
-4. **Point the webhooks at API Gateway**: configure Shopify (`orders/risk`) and Slack
+4. **Point the webhooks at API Gateway**: configure Shopify (`orders/create` **and**
+   `orders/risk_assessment_changed`, both needing the `read_orders` scope) and Slack
    (interactivity + events) to POST to the `api_gateway_webhook_url` output
-   (`/webhooks/shopify` and `/webhooks/slack`).
+   (`/webhooks/shopify` and `/webhooks/slack`). `orders/create` imports the order;
+   `orders/risk_assessment_changed` delivers the fraud verdict. (Automatic risk
+   recommendations require the Shopify **Grow** plan or higher, or any plan with
+   Shopify Payments.)
 
 
 

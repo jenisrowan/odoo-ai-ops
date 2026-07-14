@@ -89,6 +89,12 @@ code = code.replace(
     "    def save(self, session):"
 )
 
+# Fix TypeError: RedisSessionStore.rotate() takes 3 positional arguments but 4 were given in Odoo 19
+code = code.replace(
+    "def rotate(self, session, env):",
+    "def rotate(self, session, env, *args, **kwargs):"
+)
+
 session_file.write_text(code)
 print(f"  Patched {session_file}")
 

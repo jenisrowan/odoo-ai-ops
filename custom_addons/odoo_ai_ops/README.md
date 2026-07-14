@@ -8,23 +8,38 @@ does the LLM work and human-in-the-loop orchestration over Slack.
 
 | Capability | Entry point |
 |---|---|
-| Shopify order-risk gatekeeper (cheap+risky -> auto-cancel; else escalate) | `POST /ai_ops/webhook/order_risk` -> `ai.ops.order.risk.process_webhook` |
+| Shopify order intake (`orders/create` -> confirmed `sale.order`, raw payload stored) | `POST /ai_ops/webhook/order_create` -> `ai.ops.order.intake.process_order_create` |
+| Shopify order-risk gatekeeper (cheap+risky -> auto-cancel in Shopify **and** Odoo; else escalate) | `POST /ai_ops/webhook/order_risk` -> `ai.ops.order.risk.process_webhook` |
 | Start fraud workflow on the agent | `ai.ops.task.dispatch_fraud_workflow` -> `POST {AGENT}/v1/tasks/fraud` |
 | Query catalog (JSON-RPC) | `ai.ops.inventory.query_catalog` |
 | Historical warehouse moves (JSON-RPC) | `ai.ops.inventory.warehouse_moves` |
 | Write inventory adjustment patch (JSON-RPC) | `ai.ops.inventory.apply_inventory_patch` |
 | Persist manager approval/rejection | `POST /ai_ops/task/<id>/callback` -> `ai.ops.task.ai_ops_set_approval` |
 
+## Two-event flow (order intake + async risk verdict)
+
+Shopify's fraud analysis is **asynchronous**, so the order and its risk verdict
+arrive on two separate webhooks:
+
+* `orders/create` -> `process_order_create` builds a **confirmed `sale.order`**
+  (customer + line items mapped, full payload stored on `shopify_raw_payload`).
+  Unknown SKUs auto-create a minimal product so an order is never dropped.
+* `orders/risk_assessment_changed` -> `process_webhook` correlates the verdict to
+  that order by `shopify_order_id` and applies the cheap-order bypass below.
+
 ## The cheap-order bypass rule
 
-`process_webhook` cancels an order **directly in Shopify with zero LLM spend**
-when *both* hold:
+`process_webhook` cancels an order **in both Shopify and Odoo with zero LLM
+spend** when *both* hold:
 
-* order total **<** `odoo_ai_ops.bypass_threshold` (default **$10**), and
+* order total **<** `odoo_ai_ops.bypass_threshold` (default **$10**) — the risk
+  webhook carries no total, so it is recovered from the correlated `sale.order`;
+  when the total is genuinely unknown the order is escalated, never auto-cancelled — and
 * Shopify risk level is **medium** or **high**.
 
 Otherwise low/no-risk orders are recorded and closed, and everything else is
-escalated to the LangGraph agent.
+escalated to the LangGraph agent. The risk topic can fire repeatedly, so a later
+risky assessment can still escalate a previously benign order.
 
 ## Configuration
 

@@ -141,10 +141,22 @@ class AgentRuntime:
     # ------------------------------------------------------------------
     # Event routing
     # ------------------------------------------------------------------
-    async def forward_webhook(self, payload: dict) -> dict:
-        """Relay a Shopify order-risk payload to the Odoo gatekeeper."""
+    async def forward_webhook(self, payload: dict, topic: str = "") -> dict:
+        """Relay a Shopify webhook to the right Odoo endpoint by topic.
+
+        ``orders/create`` builds the sale.order; the risk-assessment topic
+        (``orders/risk_assessment_changed``, or the legacy ``orders/risk``) drives
+        the fraud gatekeeper. Unknown topics default to the risk path for
+        backward compatibility.
+        """
+        if topic == "orders/create":
+            result = await self.odoo_client.forward_order_create(payload)
+            logger.info("Forwarded orders/create webhook to Odoo -> %s", result.get("action"))
+            return result
         result = await self.odoo_client.forward_order_risk(payload)
-        logger.info("Forwarded order-risk webhook to Odoo -> %s", result.get("action"))
+        logger.info(
+            "Forwarded order-risk webhook (%s) to Odoo -> %s", topic or "n/a", result.get("action")
+        )
         return result
 
     async def handle_slack_interaction(self, payload: dict) -> None:
@@ -180,16 +192,17 @@ class AgentRuntime:
             {"source": "shopify"|"slack", "topic": "...", "payload": {...}}
         """
         source = (body.get("source") or "").lower()
+        topic = (body.get("topic") or "").lower()
         raw_payload = body.get("payload")
         payload = raw_payload if isinstance(raw_payload, dict | list) else body
 
         if source == "slack":
             await self.handle_slack_interaction(payload)
         elif source == "shopify":
-            await self.forward_webhook(payload)
+            await self.forward_webhook(payload, topic=topic)
         else:
             # Fall back to a best-effort guess so malformed envelopes are still handled.
             if isinstance(payload, dict) and payload.get("type") == "block_actions":
                 await self.handle_slack_interaction(payload)
             else:
-                await self.forward_webhook(payload)
+                await self.forward_webhook(payload, topic=topic)

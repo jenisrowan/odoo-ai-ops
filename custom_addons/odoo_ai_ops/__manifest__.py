@@ -14,9 +14,14 @@ agent cluster described in the project architecture.
 
 Capabilities
 ------------
-* **Shopify OrderRisk gatekeeper** - receives forwarded Shopify ``orders/risk``
-  webhook payloads from the agent, applies a cheap-order auto-rejection rule
-  (total < threshold AND medium/high risk -> cancel in Shopify, no LLM spend),
+* **Shopify order intake** - receives forwarded Shopify ``orders/create``
+  payloads and builds a confirmed ``sale.order`` in Odoo (mapping the customer
+  and line items, storing the full raw payload), so orders live in Odoo without
+  a separate connector.
+* **Shopify OrderRisk gatekeeper** - receives forwarded Shopify
+  ``orders/risk_assessment_changed`` payloads from the agent, correlates them to
+  the imported order, applies a cheap-order auto-rejection rule (total <
+  threshold AND medium/high risk -> cancel in Shopify and Odoo, no LLM spend),
   and otherwise opens an ``ai.ops.task`` and dispatches the LangGraph fraud
   workflow over REST.
 * **Reconciliation & inventory actions** - JSON-RPC callable methods the agent
@@ -33,6 +38,7 @@ Capabilities
         "base",
         "mail",
         "stock",
+        "sale",
     ],
     "data": [
         "security/ai_ops_security.xml",
@@ -41,6 +47,7 @@ Capabilities
         "data/ir_config_parameter.xml",
         "data/ir_cron.xml",
         "views/ai_ops_task_views.xml",
+        "views/sale_order_views.xml",
         "views/res_config_settings_views.xml",
         "views/ai_ops_menus.xml",
     ],

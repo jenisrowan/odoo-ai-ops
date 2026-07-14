@@ -82,6 +82,13 @@ class AiOpsTask(models.Model):
     shopify_order_name = fields.Char(string="Shopify Order Name")
     order_total = fields.Monetary(string="Order Total", currency_field="currency_id")
     currency_id = fields.Many2one("res.currency", default=lambda self: self.env.company.currency_id)
+    sale_order_id = fields.Many2one(
+        "sale.order",
+        string="Sale Order",
+        copy=False,
+        index=True,
+        help="The Odoo order this fraud task gates. Cancelled here when the order is rejected.",
+    )
 
     # --- Product context (reconciliation workflow) ---
     product_id = fields.Many2one("product.product", string="Product")
@@ -299,11 +306,19 @@ class AiOpsTask(models.Model):
         self.message_post(body=body)
 
         cancelled = False
-        if decision == "reject" and self.task_type == "fraud" and self.shopify_order_id:
-            cancelled = self._cancel_in_shopify(reason="FRAUD", staff_note="AI fraud review: rejected")
+        order_cancelled = False
+        if decision == "reject" and self.task_type == "fraud":
+            if self.shopify_order_id:
+                cancelled = self._cancel_in_shopify(reason="FRAUD", staff_note="AI fraud review: rejected")
+            order_cancelled = self._cancel_sale_order()
         # The workflow is now resolved.
         self.write({"state": "done"})
-        return {"task": self.name, "decision": decision, "shopify_cancelled": cancelled}
+        return {
+            "task": self.name,
+            "decision": decision,
+            "shopify_cancelled": cancelled,
+            "order_cancelled": order_cancelled,
+        }
 
     # ------------------------------------------------------------------
     # Manual (Odoo-side) overrides
@@ -345,6 +360,28 @@ class AiOpsTask(models.Model):
                 "Order %s cancelled in Shopify (reason: %s).", self.shopify_order_name or self.shopify_order_id, reason
             )
         )
+        return True
+
+    def _cancel_sale_order(self):
+        """Cancel this task's Odoo ``sale.order``. Returns True on success.
+
+        Idempotent: an order already cancelled (e.g. a repeated risk assessment)
+        is treated as success. Failures are logged but never raised - the
+        Shopify-side cancellation and the fraud decision must still be recorded.
+        """
+        self.ensure_one()
+        order = self.sale_order_id
+        if not order:
+            return False
+        if order.state == "cancel":
+            return True
+        try:
+            order.action_cancel()
+        except Exception as exc:  # noqa: BLE001 - never block the decision on this
+            _logger.exception("AI Ops: Odoo order cancel failed for %s", self.name)
+            self.message_post(body=_("Odoo order cancellation FAILED: %s", exc))
+            return False
+        self.message_post(body=_("Odoo order %s cancelled.", order.name))
         return True
 
     # ------------------------------------------------------------------

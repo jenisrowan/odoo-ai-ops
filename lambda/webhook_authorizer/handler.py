@@ -118,14 +118,15 @@ def _handle_shopify(event, headers, raw_body):
         payload = json.loads(raw_body or "{}")
     except json.JSONDecodeError:
         return _response(400, {"error": "invalid_json"})
+    topic = headers.get("x-shopify-topic", "")
     _enqueue(
         {
             "source": "shopify",
-            "topic": headers.get("x-shopify-topic", "orders/risk"),
+            "topic": topic,
             "payload": payload,
         }
     )
-    logger.info("Enqueued Shopify webhook topic=%s", headers.get("x-shopify-topic"))
+    logger.info("Enqueued Shopify webhook topic=%s", topic or "n/a")
     return _response(200, {"ok": True})
 
 

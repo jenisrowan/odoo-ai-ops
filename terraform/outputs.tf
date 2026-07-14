@@ -26,7 +26,7 @@ output "clickhouse_ecr_url" {
 }
 
 # Public webhook ingress (through the edge - WAF + CloudFront). Point Shopify
-# (orders/risk) and Slack at:
+# (orders/create + orders/risk_assessment_changed) and Slack at:
 #   https://<cloudfront_url>/webhooks/shopify
 #   https://<cloudfront_url>/webhooks/slack
 output "webhook_url" {

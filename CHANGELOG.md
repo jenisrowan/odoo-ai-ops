@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-07-13
+
+### Added
+- **Shopify order intake**: `orders/create` webhooks are now imported into Odoo as **confirmed `sale.order`** records (customer + line items mapped, unknown SKUs auto-created, full raw payload stored on `shopify_raw_payload`). Removes the previous assumption that a separate Shopify connector creates the order. New endpoint `POST /ai_ops/webhook/order_create` (`ai.ops.order.intake`), agent topic routing, and `sale.order` form fields/smart button.
+
+### Changed
+- **Async risk verdict**: Switched the fraud webhook from the deprecated `orders/risk` to Shopify's real `orders/risk_assessment_changed` topic. The risk assessment carries no order total, so it is correlated back to the imported `sale.order` (total recovered from it); a genuinely unknown total is escalated rather than auto-cancelled. Auto-reject and manager rejection now cancel the order in **both Shopify and Odoo**. The risk topic can fire repeatedly, so a later risky assessment can escalate a previously benign order.
+- **Module dependency**: `odoo_ai_ops` now depends on `sale`.
+
 ## [Unreleased] - 2026-07-08
 
 ### Added

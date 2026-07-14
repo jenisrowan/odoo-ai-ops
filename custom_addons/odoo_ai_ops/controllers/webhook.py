@@ -8,7 +8,10 @@ shared bearer token (``odoo_ai_ops.shared_token``) compared in constant time.
 
 Endpoints
 ---------
-* ``POST /ai_ops/webhook/order_risk`` - forwarded Shopify order-risk payload.
+* ``POST /ai_ops/webhook/order_create`` - forwarded Shopify ``orders/create``
+  payload; builds a confirmed ``sale.order`` in Odoo.
+* ``POST /ai_ops/webhook/order_risk`` - forwarded Shopify risk-assessment
+  payload; cancels the order if it is risky.
 * ``POST /ai_ops/task/<id>/callback``  - manager approval/rejection relayed
   from Slack by the agent.
 * ``GET  /ai_ops/health``              - lightweight liveness probe.
@@ -69,6 +72,26 @@ class AiOpsWebhookController(http.Controller):
     @http.route("/ai_ops/health", type="http", auth="public", methods=["GET"], csrf=False)
     def health(self, **kwargs):
         return _json_response({"status": "ok", "service": "odoo_ai_ops"})
+
+    @http.route(
+        "/ai_ops/webhook/order_create", type="http", auth="public", methods=["POST"], csrf=False, save_session=False
+    )
+    def order_create(self, **kwargs):
+        """Receive a forwarded Shopify ``orders/create`` payload and import it."""
+        denied = _authenticate()
+        if denied:
+            return denied
+
+        payload = _parse_body()
+        if payload is None:
+            return _json_response({"error": "invalid_json"}, status=400)
+
+        try:
+            result = request.env["ai.ops.order.intake"].sudo().process_order_create(payload)
+        except Exception as exc:  # noqa: BLE001 - surface a clean 500 so SQS redelivers
+            _logger.exception("AI Ops: order_create processing failed.")
+            return _json_response({"error": "processing_failed", "detail": str(exc)}, status=500)
+        return _json_response(result)
 
     @http.route(
         "/ai_ops/webhook/order_risk", type="http", auth="public", methods=["POST"], csrf=False, save_session=False
