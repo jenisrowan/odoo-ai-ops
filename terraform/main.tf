@@ -120,6 +120,7 @@ module "ecs" {
   model_high          = var.model_high
   odoo_db_name        = var.odoo_db_name
   odoo_agent_username = var.odoo_agent_username
+  slack_channel       = var.slack_channel
 }
 
 module "telemetry" {

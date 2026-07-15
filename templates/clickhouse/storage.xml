@@ -17,6 +17,11 @@
         <endpoint from_env="CLICKHOUSE_S3_ENDPOINT"></endpoint>
         <region from_env="CLICKHOUSE_S3_REGION"></region>
         <use_environment_credentials>true</use_environment_credentials>
+        <!-- Don't do a fatal write/read access-check at startup: a not-yet-ready
+             or briefly-unavailable bucket at boot would otherwise crash ClickHouse
+             (Code 499, S3_ERROR) and it would not recover. Validate lazily on the
+             first data move to the cold tier instead. -->
+        <skip_access_check>true</skip_access_check>
         <!-- Local metadata cache for the S3 disk keeps hot lookups fast. -->
         <metadata_path>/var/lib/clickhouse/disks/s3_cold/</metadata_path>
       </s3_cold>

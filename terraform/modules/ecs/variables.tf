@@ -65,6 +65,11 @@ variable "model_high" { type = string }
 variable "odoo_db_name" { type = string }
 variable "odoo_agent_username" { type = string }
 
+variable "slack_channel" {
+  description = "Slack channel the agent posts approval cards to, e.g. #fraud-review."
+  type        = string
+}
+
 variable "templates_dir" {
   description = "Path to the ECS container-definition templates."
   type        = string

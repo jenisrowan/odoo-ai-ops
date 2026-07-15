@@ -6,9 +6,31 @@ Odoo 19 removed/changed several internal APIs that this module relies on:
   1. `odoo.conf` -> removed; use `odoo.tools.config` instead
   2. `odoo.tools.func.lazy_property` -> deprecated; use `functools.cached_property`
   3. `odoo.tools.config.misc` -> removed; use `getattr` with fallback
+  4. Session rotation reworked (soft rotation + session identifiers + device
+     tracking). The stock module hard-deletes the session on every rotation and
+     never refreshes create_time, so past the rotation interval it rotates on
+     *every* request and drops concurrent in-flight requests (intermittent
+     logouts). It also lacks delete_old_sessions/get_missing_session_identifiers/
+     delete_from_identifiers. We port Odoo 19's real rotate() semantics and add
+     the identifier helpers, Redis-backed, and adopt core's 84-char sid scheme so
+     the identifier prefix is stable across a soft rotation.
 """
-import re
 import pathlib
+from importlib import metadata
+
+# This patch does textual surgery on a specific release of the module, so it is
+# pinned to exactly the version installed by templates/Dockerfile.odoo. The two
+# MUST be bumped together: on a version change, re-verify every anchor below and
+# update EXPECTED_VERSION. We fail the image build rather than silently ship a
+# store patched against the wrong source.
+EXPECTED_VERSION = "1.4.1"
+_installed = metadata.version("mangono-odoo-redis-session")
+if _installed != EXPECTED_VERSION:
+    raise SystemExit(
+        f"patch_redis_session: mangono-odoo-redis-session=={_installed} installed "
+        f"but this patch targets =={EXPECTED_VERSION}. Pin the same version in "
+        f"templates/Dockerfile.odoo, or update this patch to match the new source."
+    )
 
 ADDON_DIR = pathlib.Path(
     "/usr/local/lib/python3.12/dist-packages/odoo/addons/redis_session_store"
@@ -65,6 +87,12 @@ print(f"  Patched {config_file}")
 session_file = ADDON_DIR / "redis_session.py"
 code = session_file.read_text()
 
+# Odoo 19's ported soft-rotation logic needs the `time` module.
+code = code.replace(
+    "import json\nimport logging\nimport warnings",
+    "import json\nimport logging\nimport time\nimport warnings",
+)
+
 # Fix AttributeError: 'Session' object has no attribute 'expiration' in Odoo 19
 code = code.replace(
     "expiration = session.expiration or self.anon_expiration",
@@ -75,25 +103,109 @@ code = code.replace(
     "expiration = getattr(session, 'expiration', None) or self.expiration"
 )
 
-# Fix AttributeError: 'RedisSessionStore' object has no attribute 'delete_old_sessions'
-code = code.replace(
-    "    def save(self, session):",
-    "    def delete_old_sessions(self, session):\n"
-    "        pass\n\n"
-    "    def get_missing_session_identifiers(self, identifiers):\n"
-    "        missing = set()\n"
-    "        for identifier in set(identifiers):\n"
-    "            if not self.redis.exists(self.build_key(identifier)):\n"
-    "                missing.add(identifier)\n"
-    "        return missing\n\n"
-    "    def save(self, session):"
+# Replace the pre-19 rotate() with Odoo 19's real rotation semantics and add the
+# session-identifier helpers the store is now expected to provide. Ports
+# http.FilesystemSessionStore, Redis-backed via our own save/get/delete.
+OLD_ROTATE = (
+    "    def rotate(self, session, env):\n"
+    "        self.delete(session)\n"
+    "        session.sid = self.generate_key()\n"
+    "        if session.uid and env:\n"
+    "            session.session_token = security.compute_session_token(session, env)\n"
+    "        self.save(session)"
 )
+NEW_ROTATE = '''\
+    def generate_key(self, salt=None):
+        # Odoo 19 splits the sid into a stable identifier (first
+        # STORED_SESSION_BYTES chars, stored as res.device.log.session_identifier)
+        # and a rotating remainder. Reuse core's 84-char base64 scheme; the
+        # inherited werkzeug default is a 40-char sha1 with no room for a rotating
+        # suffix, which would make soft rotation a no-op (next_sid == old sid).
+        return http.FilesystemSessionStore.generate_key(self, salt)
 
-# Fix TypeError: RedisSessionStore.rotate() takes 3 positional arguments but 4 were given in Odoo 19
-code = code.replace(
-    "def rotate(self, session, env):",
-    "def rotate(self, session, env, *args, **kwargs):"
-)
+    def is_valid_key(self, key):
+        return http.FilesystemSessionStore.is_valid_key(self, key)
+
+    def rotate(self, session, env, soft=False):
+        # Ported from Odoo 19 http.FilesystemSessionStore.rotate. A soft rotation
+        # (every SESSION_ROTATION_INTERVAL for logged-in users) keeps the old
+        # session alive in Redis for a short grace period so concurrent in-flight
+        # requests still carrying the old cookie are not logged out, and refreshes
+        # create_time so rotation happens once per interval, not on every request.
+        if soft:
+            static = session.sid[:http.STORED_SESSION_BYTES]
+            recent_session = self.get(session.sid)
+            if "next_sid" in recent_session:
+                # A concurrent request already rotated; adopt its new sid.
+                session.sid = recent_session["next_sid"]
+                return
+            next_sid = static + self.generate_key()[http.STORED_SESSION_BYTES:]
+            session["next_sid"] = next_sid
+            session["deletion_time"] = time.time() + http.SESSION_DELETION_TIMER
+            self.save(session)
+            # Prepare the new session; the old one is GC'd by delete_old_sessions.
+            session["gc_previous_sessions"] = True
+            session.sid = next_sid
+            del session["deletion_time"]
+            del session["next_sid"]
+        else:
+            self.delete(session)
+            session.sid = self.generate_key()
+        if session.uid:
+            assert env, "saving this session requires an environment"
+            session.session_token = security.compute_session_token(session, env)
+        session.should_rotate = False
+        session["create_time"] = time.time()
+        self.save(session)
+
+    def delete_old_sessions(self, session):
+        # Ported from Odoo 19: once the grace period elapses, purge the previous
+        # (pre-rotation) session sharing this session's identifier prefix.
+        if "gc_previous_sessions" in session:
+            if session["create_time"] + http.SESSION_DELETION_TIMER < time.time():
+                self.delete_from_identifiers([session.sid[:http.STORED_SESSION_BYTES]])
+                del session["gc_previous_sessions"]
+                self.save(session)
+
+    def get_missing_session_identifiers(self, identifiers):
+        # Return the identifiers (first STORED_SESSION_BYTES chars of a sid) with
+        # no live session in Redis; used by the res.device revocation cron. Scan
+        # the session keyspace once (non-blocking SCAN) and diff, instead of one
+        # lookup per identifier over a potentially huge candidate set.
+        identifiers = set(identifiers)
+        if not identifiers:
+            return identifiers
+        prefix_len = len(self.prefix)
+        existing = set()
+        for key in self.redis.scan_iter(match=f"{self.prefix}*", count=1000):
+            if isinstance(key, bytes):
+                key = key.decode("utf-8")
+            existing.add(key[prefix_len:][:http.STORED_SESSION_BYTES])
+        return identifiers - existing
+
+    def delete_from_identifiers(self, identifiers):
+        # Delete every session whose sid starts with one of the given identifiers
+        # (device revocation and previous-session GC). The regex check mirrors
+        # core and prevents deleting sessions from a forged identifier.
+        keys = []
+        for identifier in identifiers:
+            if not http._session_identifier_re.match(identifier):
+                raise ValueError(
+                    "Identifier format incorrect, did you pass in a string instead of a list?"
+                )
+            keys.extend(
+                self.redis.scan_iter(match=f"{self.build_key(identifier)}*", count=1000)
+            )
+        # Delete one key at a time: on a cluster (ElastiCache/Valkey Serverless)
+        # the full sids sharing an identifier prefix still hash to different
+        # slots, so a single multi-key DELETE would raise CROSSSLOT.
+        for key in keys:
+            self.redis.delete(key)'''
+# The version is pinned above, so this anchor is guaranteed present; the check
+# only exists so a silently-failing str.replace can never ship a no-op patch.
+if OLD_ROTATE not in code:
+    raise SystemExit("patch_redis_session: rotate() anchor not found in redis_session.py.")
+code = code.replace(OLD_ROTATE, NEW_ROTATE)
 
 session_file.write_text(code)
 print(f"  Patched {session_file}")

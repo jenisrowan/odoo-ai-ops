@@ -51,12 +51,37 @@ so secrets never need to be stored in the database):
 | Parameter | Env fallback | Notes |
 |---|---|---|
 | `odoo_ai_ops.agent_base_url` | `AGENT_BASE_URL` | e.g. `http://fastapi.odoo.local:8000` |
-| `odoo_ai_ops.shared_token` | `AI_OPS_SHARED_TOKEN` | bearer shared with the agent |
 | `odoo_ai_ops.shopify_shop_domain` | `SHOPIFY_SHOP_DOMAIN` | `my-store.myshopify.com` |
-| `odoo_ai_ops.shopify_admin_token` | `SHOPIFY_ADMIN_TOKEN` | Shopify Admin API token |
 | `odoo_ai_ops.shopify_api_version` | `SHOPIFY_API_VERSION` | default `2026-07` |
+| `odoo_ai_ops.shopify_webhook_callback_url` | `SHOPIFY_WEBHOOK_CALLBACK_URL` | edge ingress, e.g. `https://<cloudfront>/webhooks/shopify` |
 | `odoo_ai_ops.bypass_threshold` | - | default `10.0` |
 | `odoo_ai_ops.auto_reject_enabled` | - | default `True` |
+
+Secrets are **not** UI fields — they live once in AWS Secrets Manager
+(`odoo/integration/credentials`) and reach Odoo as env vars, resolved at runtime
+via `os.environ` (never persisted to the database):
+
+| Secret (env var) | Secrets Manager key |
+|---|---|
+| `SHOPIFY_ADMIN_TOKEN` | `shopify_admin_token` |
+| `SHOPIFY_WEBHOOK_SECRET` | `shopify_webhook_secret` |
+| `AI_OPS_SHARED_TOKEN` | `ai_ops_shared_token` |
+
+### Registering the Shopify webhooks
+
+Shopify's web UI only offers Pub/Sub or EventBridge destinations for a **custom
+app**, so the plain HTTPS webhooks this integration needs must be created through
+the Admin API. Rather than a one-off script, this lives as a Settings action:
+set **Shopify Webhook Callback URL** (the edge ingress — CloudFront `/webhooks/shopify`,
+Terraform output `webhook_url` + `/shopify`) and click **Register Shopify
+Webhooks** under **Settings → AI Ops → Shopify**. It subscribes `orders/create`
+and `orders/risk_assessment_changed` via `webhookSubscriptionCreate`, and is
+idempotent — re-running re-points a stale URL or does nothing if already set
+(`ShopifyClient.sync_webhooks`).
+
+> The webhook HMAC Shopify signs with is the **app's API secret key**; keep
+> `SHOPIFY_WEBHOOK_SECRET` (used by the ingest Lambda to verify) in sync with it,
+> otherwise every delivery is rejected with a 401.
 
 ## Security
 

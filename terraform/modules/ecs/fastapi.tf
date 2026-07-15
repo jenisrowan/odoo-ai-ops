@@ -156,7 +156,7 @@ resource "aws_ecs_task_definition" "fastapi" {
     odoo_username          = var.odoo_agent_username
     integration_secret_arn = var.integration_secret_arn
     langfuse_host          = var.langfuse_host
-    slack_channel          = "#fraud-review"
+    slack_channel          = var.slack_channel
     model_medium           = var.model_medium
     model_high             = var.model_high
   })

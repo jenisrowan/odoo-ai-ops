@@ -23,17 +23,13 @@
                         </setting>
                     </block>
                     <block title="Agent Cluster" name="ai_ops_agent">
-                        <setting string="FastAPI Agent" help="Endpoint and shared auth token for the LangGraph agent cluster.">
+                        <setting string="FastAPI Agent"
+                                 help="Endpoint of the LangGraph agent cluster. The shared auth token is a secret, injected from AWS Secrets Manager as AI_OPS_SHARED_TOKEN (the agent reads the same value); it is not entered here.">
                             <div class="content-group">
                                 <div class="row">
                                     <label for="ai_ops_agent_base_url" class="col-lg-4 o_light_label"/>
                                     <field name="ai_ops_agent_base_url"
                                            placeholder="http://fastapi.odoo.local:8000"/>
-                                </div>
-                                <div class="row">
-                                    <label for="ai_ops_shared_token" class="col-lg-4 o_light_label"/>
-                                    <field name="ai_ops_shared_token" password="True"
-                                           placeholder="Injected from Secrets Manager in production"/>
                                 </div>
                             </div>
                         </setting>
@@ -43,7 +39,8 @@
                                  help="Also refund the payment when AI Ops cancels an order in Shopify. Off by default: fraud rejections usually should not auto-refund.">
                             <field name="ai_ops_refund_on_cancel"/>
                         </setting>
-                        <setting string="Shopify Admin API" help="Used to cancel/reject orders directly.">
+                        <setting string="Shopify Admin API"
+                                 help="Used to cancel/reject orders and register webhooks. The Admin API token is a secret: it is injected from AWS Secrets Manager as SHOPIFY_ADMIN_TOKEN and is not entered here.">
                             <div class="content-group">
                                 <div class="row">
                                     <label for="ai_ops_shopify_shop_domain" class="col-lg-4 o_light_label"/>
@@ -51,13 +48,29 @@
                                            placeholder="my-store.myshopify.com"/>
                                 </div>
                                 <div class="row">
-                                    <label for="ai_ops_shopify_admin_token" class="col-lg-4 o_light_label"/>
-                                    <field name="ai_ops_shopify_admin_token" password="True"
-                                           placeholder="Injected from Secrets Manager in production"/>
-                                </div>
-                                <div class="row">
                                     <label for="ai_ops_shopify_api_version" class="col-lg-4 o_light_label"/>
                                     <field name="ai_ops_shopify_api_version"/>
+                                </div>
+                            </div>
+                        </setting>
+                        <setting string="Webhook Registration"
+                                 help="Subscribe orders/create and orders/risk_assessment_changed to the edge ingress via the Admin API. Shopify's UI can't create HTTPS webhooks for a custom app. Idempotent - safe to re-run.">
+                            <div class="content-group">
+                                <div class="row">
+                                    <label for="ai_ops_shopify_webhook_callback_url" class="col-lg-4 o_light_label"/>
+                                    <field name="ai_ops_shopify_webhook_callback_url"
+                                           placeholder="https://&lt;cloudfront-domain&gt;/webhooks/shopify"/>
+                                </div>
+                                <div class="mt8">
+                                    <button type="object"
+                                            name="action_ai_ops_register_shopify_webhooks"
+                                            string="Register Shopify Webhooks"
+                                            icon="fa-cloud-upload"
+                                            class="btn-secondary"/>
+                                </div>
+                                <div class="text-muted mt4">
+                                    Signature check uses the app's API secret; keep
+                                    <strong>SHOPIFY_WEBHOOK_SECRET</strong> in sync with it.
                                 </div>
                             </div>
                         </setting>

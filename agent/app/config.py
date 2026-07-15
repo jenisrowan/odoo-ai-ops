@@ -46,7 +46,10 @@ class Settings(BaseSettings):
     # --- Slack ---
     slack_bot_token: str = Field(default="")
     slack_signing_secret: str = Field(default="")
-    slack_channel: str = Field(default="#fraud-review")
+    # No default channel on purpose: a baked-in "#fraud-review" silently posts
+    # approval cards to whatever that resolves to in someone else's workspace.
+    # It must be supplied explicitly (SLACK_CHANNEL); Slack stays disabled otherwise.
+    slack_channel: str = Field(default="", description="Target channel, e.g. #fraud-review.")
 
     # --- Langfuse (self-hosted telemetry) ---
     langfuse_host: str = Field(default="")
@@ -59,7 +62,8 @@ class Settings(BaseSettings):
 
     @property
     def slack_enabled(self) -> bool:
-        return bool(self.slack_bot_token)
+        # Both are required: a token without a channel would fail at post time.
+        return bool(self.slack_bot_token and self.slack_channel)
 
 
 @lru_cache

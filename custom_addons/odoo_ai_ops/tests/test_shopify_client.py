@@ -21,6 +21,43 @@ def _resp(json_data, status=200):
     return r
 
 
+_URL = "https://edge.example/webhooks/shopify"
+
+
+def _wh_list(nodes):
+    return _resp(
+        {
+            "data": {
+                "webhookSubscriptions": {
+                    "edges": [{"node": n} for n in nodes],
+                    "pageInfo": {"hasNextPage": False, "endCursor": None},
+                }
+            }
+        }
+    )
+
+
+def _wh_write_ok(mutation):
+    return _resp(
+        {
+            "data": {
+                mutation: {
+                    "webhookSubscription": {"id": "gid://shopify/WebhookSubscription/9"},
+                    "userErrors": [],
+                }
+            }
+        }
+    )
+
+
+def _wh_create_ok():
+    return _wh_write_ok("webhookSubscriptionCreate")
+
+
+def _wh_update_ok():
+    return _wh_write_ok("webhookSubscriptionUpdate")
+
+
 @tagged("post_install", "-at_install", "ai_ops")
 class TestShopifyClient(TransactionCase):
     def _client(self):
@@ -133,3 +170,73 @@ class TestShopifyClient(TransactionCase):
         result = self._client().set_inventory_quantity("SKU1", 10)
         self.assertEqual(result["quantity"], 10)
         self.assertEqual(result["location_id"], "gid://shopify/Location/9")
+
+    @patch(_PATH)
+    def test_get_shop_info_returns_shop(self, mock_post):
+        mock_post.return_value = _resp(
+            {"data": {"shop": {"name": "Test Store", "myshopifyDomain": "test.myshopify.com"}}}
+        )
+        shop = self._client().get_shop_info()
+        self.assertEqual(shop["name"], "Test Store")
+
+    # --- Webhook subscription sync -------------------------------------
+    @patch(_PATH)
+    def test_sync_webhooks_creates_missing(self, mock_post):
+        # No existing subscriptions -> both topics are created.
+        mock_post.side_effect = [_wh_list([]), _wh_create_ok(), _wh_create_ok()]
+        summary = self._client().sync_webhooks(_URL)
+        self.assertEqual(
+            set(summary["created"]), {"orders/create", "orders/risk_assessment_changed"}
+        )
+        self.assertFalse(summary["updated"])
+        self.assertFalse(summary["unchanged"])
+        # First create carries the right topic enum, callback URL and JSON format.
+        create_vars = mock_post.call_args_list[1].kwargs["json"]["variables"]
+        self.assertEqual(create_vars["topic"], "ORDERS_CREATE")
+        self.assertEqual(create_vars["sub"]["callbackUrl"], _URL)
+        self.assertEqual(create_vars["sub"]["format"], "JSON")
+
+    @patch(_PATH)
+    def test_sync_webhooks_idempotent_when_present(self, mock_post):
+        nodes = [
+            {"id": "1", "topic": "ORDERS_CREATE", "endpoint": {"callbackUrl": _URL}},
+            {"id": "2", "topic": "ORDERS_RISK_ASSESSMENT_CHANGED", "endpoint": {"callbackUrl": _URL}},
+        ]
+        mock_post.side_effect = [_wh_list(nodes)]
+        summary = self._client().sync_webhooks(_URL)
+        self.assertEqual(
+            set(summary["unchanged"]), {"orders/create", "orders/risk_assessment_changed"}
+        )
+        # Only the list query is issued; no create/update writes.
+        self.assertEqual(mock_post.call_count, 1)
+
+    @patch(_PATH)
+    def test_sync_webhooks_repoints_stale_url(self, mock_post):
+        nodes = [{"id": "gid://shopify/WebhookSubscription/1", "topic": "ORDERS_CREATE", "endpoint": {"callbackUrl": "https://old/webhooks/shopify"}}]
+        mock_post.side_effect = [_wh_list(nodes), _wh_update_ok(), _wh_create_ok()]
+        summary = self._client().sync_webhooks(_URL)
+        self.assertEqual(summary["updated"], ["orders/create"])
+        self.assertEqual(summary["created"], ["orders/risk_assessment_changed"])
+        update_vars = mock_post.call_args_list[1].kwargs["json"]["variables"]
+        self.assertEqual(update_vars["id"], "gid://shopify/WebhookSubscription/1")
+        self.assertEqual(update_vars["sub"]["callbackUrl"], _URL)
+
+    @patch(_PATH)
+    def test_sync_webhooks_user_error_raises(self, mock_post):
+        create_err = _resp(
+            {
+                "data": {
+                    "webhookSubscriptionCreate": {
+                        "webhookSubscription": None,
+                        "userErrors": [{"message": "bad url"}],
+                    }
+                }
+            }
+        )
+        mock_post.side_effect = [_wh_list([]), create_err]
+        with self.assertRaises(ShopifyError):
+            self._client().sync_webhooks(_URL)
+
+    def test_sync_webhooks_requires_callback_url(self):
+        with self.assertRaises(ShopifyError):
+            self._client().sync_webhooks("")

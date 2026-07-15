@@ -227,3 +227,7 @@ __marimo__/
 
 # .terraform.lock.hcl IS committed (provider checksum lock — HashiCorp's
 # recommended practice for reproducible provider versions across machines/CI).
+
+# Recorded webhook deliveries from the local edge shim: real order payloads
+# (customer emails/addresses/IPs) and pure noise - evidence, not fixtures.
+agent/tests/integration/captures/

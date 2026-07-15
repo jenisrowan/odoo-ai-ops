@@ -12,7 +12,9 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/* && \
     pip install --no-cache-dir --break-system-packages boto3==1.34.46 redis==5.3.1 mangono-odoo-redis-session==1.4.1
 
-# Patch mangono-odoo-redis-session for Odoo 19 compatibility
+# Patch mangono-odoo-redis-session for Odoo 19 compatibility.
+# The patch is pinned to the exact version above (EXPECTED_VERSION in the script)
+# and fails the build if they drift -- bump both together.
 COPY templates/patch_redis_session.py /patch_redis_session.py
 RUN python3 /patch_redis_session.py && rm /patch_redis_session.py
 

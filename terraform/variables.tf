@@ -111,6 +111,12 @@ variable "model_high" {
   default     = "claude-sonnet-5"
 }
 
+variable "slack_channel" {
+  description = "Slack channel the agent posts fraud-approval cards to (e.g. #fraud-review). Set per deployment; not baked into the module."
+  type        = string
+  default     = ""
+}
+
 variable "alb_origin_domain_name" {
   description = <<-EOT
     Optional custom domain that resolves to the ALB and is covered by
