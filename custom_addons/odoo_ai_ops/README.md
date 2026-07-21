@@ -86,9 +86,42 @@ idempotent — re-running re-points a stale URL or does nothing if already set
 ## Security
 
 Three groups: **AI Ops User**, **AI Ops Manager**, and **AI Ops Agent
-(Technical)**. The agent authenticates JSON-RPC as a dedicated user in the
-*Agent* group (which implies *Stock Manager* so it can apply inventory patches).
-Server-to-server controllers are guarded by a constant-time shared-token check.
+(Technical)**. The agent authenticates JSON-RPC as a dedicated user (login
+`ai_ops_agent`, provisioned by `templates/odoo-bootstrap.py`) in the *Agent*
+group. Server-to-server controllers are guarded by a constant-time shared-token
+check.
+
+### What the agent's credential can do
+
+The read-only LangGraph toolbelt and the approval gate both live *above* Odoo,
+so neither constrains someone holding the agent's JSON-RPC password. The
+boundary that does:
+
+* **No stock manager role.** The Agent group implies `stock.group_stock_user`,
+  not `stock.group_stock_manager`. Stock *user* is required, not optional:
+  `stock.quant._is_inventory_mode()` gates the whole inventory-adjustment flow
+  on that group and reads `env.user`, which `sudo()` does not change. Manager
+  would have added unlink on `stock.move` plus full write/unlink on warehouses,
+  locations, routes and putaway rules.
+* **Global record rules deny every direct write.** Stock *user* still grants
+  create/write on `stock.quant`, so `ir.rule` records deny the agent
+  write/create/unlink on `stock.quant`, `stock.move`, `stock.move.line`,
+  `stock.picking` and `stock.lot`. Reads are untouched. The rules are global and
+  no-ops for every other user.
+* **`ai.ops.inventory` is the only way through.** Its write methods elevate
+  internally *after* `_require_approved_task` confirms a persisted *approve*
+  decision on a matching task, and `sudo()` bypasses record rules — so the gated
+  path still works and is the only route from that credential to stock. Reads
+  elevate too, with explicit company scoping (sudo bypasses the multi-company
+  rule) and pinned field lists, so the readable surface is these methods rather
+  than the models behind them.
+* **The agent still needs write on `ai.ops.task`** (`register_agent_run`,
+  `ai_ops_set_approval`) — that is how the Slack decision is persisted, and the
+  inventory gate reads it back. A literally zero-write credential would require
+  moving the adjustment into Odoo itself, triggered by the decision.
+
+`TestAgentCredentialIsConstrained` pins all of this: the direct writes fail, the
+approved adjustment still lands, and other users are unaffected.
 
 ## Tests
 

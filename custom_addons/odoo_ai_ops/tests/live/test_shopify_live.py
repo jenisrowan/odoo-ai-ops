@@ -79,9 +79,7 @@ def test_register_and_verify_webhooks(client, callback_url, shopify_mod):
     subs = client.list_webhooks()
     live_topics = {s["topic"] for s in subs if s.get("callback_url") == callback_url}
     for topic_enum in shopify_mod.WEBHOOK_TOPICS:
-        assert topic_enum in live_topics, (
-            f"{topic_enum} not registered to {callback_url}; sync={summary}; subs={subs}"
-        )
+        assert topic_enum in live_topics, f"{topic_enum} not registered to {callback_url}; sync={summary}; subs={subs}"
     # Idempotency: a second sync must neither create nor update anything.
     again = client.sync_webhooks(callback_url)
     assert not again["created"] and not again["updated"], f"second sync not idempotent: {again}"

@@ -32,13 +32,83 @@
             <field name="user_ids" eval="[(4, ref('base.user_admin'))]"/>
         </record>
 
-        <!-- Technical group for the FastAPI agent's integration user. Implies the
-             stock manager role so the agent can read moves and apply inventory
-             adjustment patches via JSON-RPC. -->
+        <!-- Technical group for the FastAPI agent's integration user.
+             Implies stock *user*, not stock *manager*: the agent needs to be a
+             stock user because stock.quant._is_inventory_mode() gates the
+             inventory-adjustment flow on has_group('stock.group_stock_user'),
+             and that check reads env.user - sudo() does not satisfy it.
+             Manager would additionally hand a leaked JSON-RPC credential
+             unlink rights on stock.move and full write/unlink on
+             stock.warehouse, stock.location, stock.route, stock.rule and
+             putaway rules. None of that is needed to reconcile stock. -->
         <record id="group_ai_ops_agent" model="res.groups">
             <field name="name">AI Ops Agent (Technical)</field>
             <field name="privilege_id" ref="privilege_ai_ops"/>
-            <field name="implied_ids" eval="[(4, ref('group_ai_ops_user')), (4, ref('stock.group_stock_manager'))]"/>
+            <field name="implied_ids" eval="[(4, ref('group_ai_ops_user')), (4, ref('stock.group_stock_user'))]"/>
+        </record>
+
+        <!-- Constrain the *credential*, not just the model.
+             The LangGraph toolbelt is read-only and the write path is gated by
+             _require_approved_task, but both of those live above Odoo: anyone
+             holding the agent's JSON-RPC password could otherwise call
+             stock.quant.write() straight through execute_kw and move stock
+             with no task and no approval - stock.group_stock_user carries
+             create/write on quants and unlink on pickings, move lines and lots.
+
+             These global rules deny the agent user every non-read operation on
+             the stock models. ai.ops.inventory's write methods sudo() their
+             own access *after* the approval gate, and sudo bypasses record
+             rules, so the gated path still works and is now the only one.
+             Rules are global (no groups) so they AND with everything; the
+             domain is a no-op for every other user. -->
+        <record id="ai_ops_agent_no_quant_write" model="ir.rule">
+            <field name="name">AI Ops Agent: no direct stock.quant writes</field>
+            <field name="model_id" ref="stock.model_stock_quant"/>
+            <field name="domain_force">[(0, '=', 1)] if user.has_group('odoo_ai_ops.group_ai_ops_agent') else [(1, '=', 1)]</field>
+            <field name="perm_read" eval="False"/>
+            <field name="perm_write" eval="True"/>
+            <field name="perm_create" eval="True"/>
+            <field name="perm_unlink" eval="True"/>
+        </record>
+
+        <record id="ai_ops_agent_no_move_write" model="ir.rule">
+            <field name="name">AI Ops Agent: no direct stock.move writes</field>
+            <field name="model_id" ref="stock.model_stock_move"/>
+            <field name="domain_force">[(0, '=', 1)] if user.has_group('odoo_ai_ops.group_ai_ops_agent') else [(1, '=', 1)]</field>
+            <field name="perm_read" eval="False"/>
+            <field name="perm_write" eval="True"/>
+            <field name="perm_create" eval="True"/>
+            <field name="perm_unlink" eval="True"/>
+        </record>
+
+        <record id="ai_ops_agent_no_move_line_write" model="ir.rule">
+            <field name="name">AI Ops Agent: no direct stock.move.line writes</field>
+            <field name="model_id" ref="stock.model_stock_move_line"/>
+            <field name="domain_force">[(0, '=', 1)] if user.has_group('odoo_ai_ops.group_ai_ops_agent') else [(1, '=', 1)]</field>
+            <field name="perm_read" eval="False"/>
+            <field name="perm_write" eval="True"/>
+            <field name="perm_create" eval="True"/>
+            <field name="perm_unlink" eval="True"/>
+        </record>
+
+        <record id="ai_ops_agent_no_picking_write" model="ir.rule">
+            <field name="name">AI Ops Agent: no direct stock.picking writes</field>
+            <field name="model_id" ref="stock.model_stock_picking"/>
+            <field name="domain_force">[(0, '=', 1)] if user.has_group('odoo_ai_ops.group_ai_ops_agent') else [(1, '=', 1)]</field>
+            <field name="perm_read" eval="False"/>
+            <field name="perm_write" eval="True"/>
+            <field name="perm_create" eval="True"/>
+            <field name="perm_unlink" eval="True"/>
+        </record>
+
+        <record id="ai_ops_agent_no_lot_write" model="ir.rule">
+            <field name="name">AI Ops Agent: no direct stock.lot writes</field>
+            <field name="model_id" ref="stock.model_stock_lot"/>
+            <field name="domain_force">[(0, '=', 1)] if user.has_group('odoo_ai_ops.group_ai_ops_agent') else [(1, '=', 1)]</field>
+            <field name="perm_read" eval="False"/>
+            <field name="perm_write" eval="True"/>
+            <field name="perm_create" eval="True"/>
+            <field name="perm_unlink" eval="True"/>
         </record>
 
         <!-- Multi-company isolation for AI Ops tasks -->

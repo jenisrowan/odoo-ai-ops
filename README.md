@@ -37,9 +37,9 @@ The infrastructure is deployed inside a multi-AZ AWS VPC.
      [ Odoo 19 Service ]                  [ Amazon SQS ]
        (ECS on EC2)                             │
              │                                  │
-             └──────────► [ Odoo SQS Workers ] ◄┘
+             └──────────► [ FastAPI SQS Worker ] ◄┘
                                │
-                               ▼ (REST API)
+                               ▼
                      [ LangGraph Agent ] 
                       (FastAPI on ECS)
                                │
@@ -71,7 +71,7 @@ This path is driven by **two** Shopify webhooks, because Shopify's fraud analysi
 
 0. **Order intake:** When an order is placed, Shopify's `orders/create` webhook is ingested (same Lambda → SQS path) and Odoo builds a **confirmed `sale.order`**, mapping the customer and line items and storing the full raw payload. Orders now live in Odoo with no separate connector.
 1. **Ingestion:** Later, Shopify's `orders/risk_assessment_changed` webhook sends the risk verdict to AWS API Gateway, which invokes a **Lambda proxy integration** that validates the HMAC signature (and answers Slack's challenge) synchronously and, on success, writes the verified payload to **Amazon SQS**.
-2. **Evaluation:** Odoo workers poll the SQS queue and correlate the verdict back to the imported order (the risk webhook carries no total, so the order total is recovered from the `sale.order`). If the order is very cheap (< $10) and marked medium/high risk, the system auto-rejects it — cancelling it in **both Shopify and Odoo** — without spending LLM tokens. Otherwise, it triggers a LangGraph agent run via REST API.
+2. **Evaluation:** The **FastAPI agent** long-polls the SQS queue and forwards the verdict to Odoo's gatekeeper (Odoo itself never touches SQS), which correlates it back to the imported order (the risk webhook carries no total, so the order total is recovered from the `sale.order`). If the order is very cheap (< $10) and marked medium/high risk, Odoo auto-rejects it — cancelling it in **both Shopify and Odoo** — without spending LLM tokens. Otherwise, it triggers a LangGraph agent run via REST API.
 3. **Execution & Risk-Triage:**
 * *Medium Risk:* Agent uses **Claude Haiku** for fast, low-cost screening.
 * *High Risk:* Agent uses **Claude Sonnet** to cross-reference IPs, shipping histories, and billing addresses.
@@ -83,7 +83,7 @@ This path is driven by **two** Shopify webhooks, because Shopify's fraud analysi
 ### 2. Intelligent Missing Stock Resolution
 
 1. An admin flags a stock mismatch for a specific product in **Odoo** and **Shopify**.
-2. The agent fetches recent sales and fulfillment logs via the **Shopify API** and traces internal warehouse moves using local **XML-RPC** calls.
+2. The agent fetches recent sales and fulfillment logs via the **Shopify API** and traces internal warehouse moves using local **JSON-RPC** calls.
 3. **Claude** analyzes the data to pinpoint the discrepancy, calculates the accurate physical inventory level, and drafts an inventory adjustment patch.
 4. The agent summarizes its findings and requests approval via **Slack**, updating Odoo's inventory only when human validation is received.
 
@@ -119,18 +119,27 @@ To reduce configuration complexity and minimize costs, this project utilizes a *
 
 ### Prerequisites
 
-* [Terraform](https://www.terraform.io/downloads.html) (>= 1.1)
+* [Terraform](https://www.terraform.io/downloads.html) (>= 1.6 — `terraform/versions.tf` pins `~> 1.6`, and the native `terraform test` suites need 1.6+)
 * AWS CLI configured with appropriate permissions.
 * Docker (for building and pushing custom images to ECR).
 
 ### Deployment
 
-1. **Setup AWS Secrets**: Before deploying, manually create two secrets in AWS Secrets Manager:
+1. **Setup AWS Secrets**: Before deploying, manually create two secrets in AWS Secrets Manager.
+
+   > **Terraform does not create these and does not rotate them.** Both are read through
+   > `data` sources (`terraform/data.tf`), so they must already exist with every required key
+   > populated or `terraform apply` fails. There is no rotation schedule attached to either;
+   > rotation is a manual edit of the secret value. The one key with a propagation path is
+   > `odoo_agent_password` — the Odoo bootstrap re-applies it to the agent's user on every boot,
+   > so changing it in Secrets Manager takes effect on the next deploy (step 3). Every other key
+   > is read at container start, so changing one requires a service restart to take effect.
 
    a. **Odoo master password** - `odoo/admin/password`, *Other type of secret*, key `password` = your master password.
 
-   b. **Integration credentials** - `odoo/integration/credentials`, *Other type of secret*, a JSON
-   document with these keys (consumed by the Odoo, FastAPI, and Lambda tasks):
+   b. **Integration credentials** - `odoo/integration/credentials` (override with the
+   `integration_secret_name` var), *Other type of secret*, a JSON document with these keys
+   (consumed by the Odoo, FastAPI, and Lambda tasks):
 
    ```json
    {
@@ -147,18 +156,38 @@ To reduce configuration complexity and minimize costs, this project utilizes a *
    }
    ```
 
+   All ten keys must be present in the JSON (the ECS task definitions reference each one, and a
+   missing key fails the task at start), but not all need real values:
+
+   | Key | Required? | If unset / placeholder |
+   | --- | --- | --- |
+   | `ai_ops_shared_token` | **Yes** | Odoo↔agent calls 401. Must be identical on both sides — it is one secret read by both tasks, so never override it per-service. |
+   | `anthropic_api_key` | **Yes** | No LLM calls; both workflows fail. |
+   | `odoo_agent_password` | **Yes** | Bootstrap logs `skipping agent-user provisioning` and the agent cannot authenticate to Odoo at all. |
+   | `shopify_shop_domain`, `shopify_admin_token` | **Yes** for stock + order paths | Reconciliation cannot read or push Shopify inventory; order cancellation fails. |
+   | `shopify_webhook_secret` | **Yes** in production | Inbound webhook signatures cannot be verified. |
+   | `slack_bot_token`, `slack_signing_secret` | Optional | Slack stays disabled (`slack_enabled` needs the token **and** `SLACK_CHANNEL`, set via the `slack_channel` Terraform var — it is deliberately not baked in, so approval cards can't post to the wrong workspace); approvals then only exist on the Odoo task, with no card to click. |
+   | `langfuse_public_key`, `langfuse_secret_key` | Optional | Tracing disabled (`langfuse_enabled` also needs `LANGFUSE_HOST`); workflows run untraced. |
+
+   The Shopify Admin API token needs `read_orders` (webhooks, fraud risk context, and the
+   reconciliation SKU→orders lookup), `read_products`, and `read_inventory` + `write_inventory`
+   (reading Shopify's available quantity and pushing Odoo's on-hand back).
+
 2. **Initialize and Apply Terraform** (or run the `Build & Deploy` GitHub Action, which builds and
-   pushes all three images then applies):
+   pushes all four images — odoo, nginx, fastapi, clickhouse — then applies):
    ```bash
    cd terraform
    terraform init
    terraform apply
    ```
 
-3. **Create the agent's Odoo user**: after first boot, create an Odoo user with login
-   `ai_ops_agent` (see `odoo_agent_username` var), set its password to `odoo_agent_password`, and
-   grant it the **AI Ops Agent (Technical)** group. The FastAPI agent authenticates as this user
-   over JSON-RPC.
+3. **Odoo bootstrap is automatic**: on boot the Odoo container runs an idempotent bootstrap
+   (`templates/odoo-bootstrap.py`) that creates the production database if missing, installs the
+   `odoo_ai_ops` module, and provisions the agent's Odoo user (login `ai_ops_agent`, see
+   `odoo_agent_username` var) with the password from the `odoo_agent_password` secret key and the
+   **AI Ops Agent (Technical)** group. The FastAPI agent authenticates as this user over JSON-RPC.
+   Rotating the secret propagates on the next deploy; a bootstrap failure aborts the deploy via
+   the ECS circuit breaker.
 
 4. **Point the webhooks at API Gateway**: configure Shopify (`orders/create` **and**
    `orders/risk_assessment_changed`, both needing the `read_orders` scope) and Slack
@@ -176,7 +205,7 @@ After deployment, Terraform will output:
 
 * `cloudfront_url`: The primary public URL for your Odoo instance.
 * `alb_url`: Internal load balancer URL.
-* `odoo_ecr_url` / `nginx_ecr_url` / `fastapi_ecr_url`: Target ECR repositories for your images.
+* `odoo_ecr_url` / `nginx_ecr_url` / `fastapi_ecr_url` / `clickhouse_ecr_url`: Target ECR repositories for the images.
 * `api_gateway_webhook_url`: Public webhook ingress (append `/webhooks/shopify` or `/webhooks/slack`).
 * `webhook_queue_url`: SQS queue the agent polls privately via PrivateLink.
 
@@ -192,7 +221,7 @@ After deployment, Terraform will output:
 ├── lambda/
 │   └── webhook_authorizer/  # API Gateway Lambda (HMAC verify + Slack challenge + SQS)
 ├── docs/                # Architecture diagrams (PlantUML) and deep-dive notes
-├── templates/           # Dockerfiles (odoo, nginx, fastapi), entrypoints, ECS task defs
+├── templates/           # Dockerfiles (odoo, nginx, fastapi, clickhouse), entrypoints, ECS task defs
 ├── terraform/           # Infrastructure as Code (ECS, RDS, Valkey, SQS, API GW, Lambda)
 ├── CHANGELOG.md         # Version history and release notes
 ├── cost_analysis.txt    # AWS monthly cost projections and tiers

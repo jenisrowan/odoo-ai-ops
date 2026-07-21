@@ -75,9 +75,7 @@ def _order(order_id: str, total: str = "250.00") -> dict:
         "total_price": total,
         "email": "itest@example.com",
         "customer": {"first_name": "Iggy", "last_name": "Test", "email": "itest@example.com"},
-        "line_items": [
-            {"title": "Widget", "sku": "SKU-ITEST", "quantity": 1, "price": total}
-        ],
+        "line_items": [{"title": "Widget", "sku": "SKU-ITEST", "quantity": 1, "price": total}],
     }
 
 
@@ -117,9 +115,23 @@ _RECON_ARGS = {
 
 
 def _simulate_claude(monkeypatch, schema, args: dict) -> None:
-    """Replace Anthropic's HTTP call with a realistic `tool_use` response."""
+    """Replace Anthropic's HTTP call with a realistic `tool_use` response.
+
+    The reconciliation graph calls the model twice over: once per turn of the
+    investigation loop (with the read-only Odoo toolbelt bound) and once to
+    collapse the transcript into the structured verdict. Only the latter offers
+    ``schema`` as a tool, so when some *other* toolbelt is on offer this answers
+    in prose - i.e. "I have finished investigating" - which is what ends the
+    loop. Returning the verdict there instead would be a tool call the
+    investigation has no tool for.
+    """
 
     async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
+        offered = {t.get("name") for t in (kwargs.get("tools") or []) if isinstance(t, dict)}
+        if offered and schema.__name__ not in offered:
+            return ChatResult(
+                generations=[ChatGeneration(message=AIMessage(content="Evidence gathered."))]
+            )
         tool_id = "toolu_" + uuid.uuid4().hex[:20]
         message = AIMessage(
             content=[{"type": "tool_use", "id": tool_id, "name": schema.__name__, "input": args}],
@@ -240,7 +252,7 @@ async def test_low_risk_order_is_ignored(runtime):
     oid = f"ITEST-{uuid.uuid4().hex[:10]}"
     await runtime.handle_sqs_message(_edge_envelope("orders/create", _order(oid, "5.00")))
     res = await runtime.forward_webhook(
-        {"id": oid, "risk_level": "low"}, topic="orders/risk_assessment_changed"
+        {"order_id": oid, "risk_level": "low"}, topic="orders/risk_assessment_changed"
     )
     assert res["action"] == "ignored", res
 
@@ -251,7 +263,7 @@ async def test_cheap_high_risk_order_is_auto_rejected(runtime):
     oid = f"ITEST-{uuid.uuid4().hex[:10]}"
     await runtime.handle_sqs_message(_edge_envelope("orders/create", _order(oid, "5.00")))
     res = await runtime.forward_webhook(
-        {"id": oid, "risk_level": "high"}, topic="orders/risk_assessment_changed"
+        {"order_id": oid, "risk_level": "high"}, topic="orders/risk_assessment_changed"
     )
     assert res["action"] == "auto_reject", res
     assert res["order_total"] == 5.0, res
@@ -263,7 +275,7 @@ async def test_expensive_high_risk_order_escalates_not_auto_rejected(runtime):
     oid = f"ITEST-{uuid.uuid4().hex[:10]}"
     await runtime.handle_sqs_message(_edge_envelope("orders/create", _order(oid, "250.00")))
     res = await runtime.forward_webhook(
-        {"id": oid, "risk_level": "high"}, topic="orders/risk_assessment_changed"
+        {"order_id": oid, "risk_level": "high"}, topic="orders/risk_assessment_changed"
     )
     assert res["action"] != "auto_reject", res
     assert res["order_total"] == 250.0, res
@@ -275,7 +287,7 @@ async def test_risk_webhook_without_total_recovers_it_from_the_order(runtime):
     oid = f"ITEST-{uuid.uuid4().hex[:10]}"
     await runtime.handle_sqs_message(_edge_envelope("orders/create", _order(oid, "5.00")))
     res = await runtime.forward_webhook(
-        {"id": oid, "risk_level": "high"}, topic="orders/risk_assessment_changed"
+        {"order_id": oid, "risk_level": "high"}, topic="orders/risk_assessment_changed"
     )
     assert res["order_total"] == 5.0, res
 
@@ -285,7 +297,7 @@ async def test_unknown_order_with_unknown_total_is_escalated_never_cancelled(run
     """An assessment for an order Odoo never imported must not be auto-cancelled."""
     oid = f"ITEST-UNKNOWN-{uuid.uuid4().hex[:8]}"
     res = await runtime.forward_webhook(
-        {"id": oid, "risk_level": "high"}, topic="orders/risk_assessment_changed"
+        {"order_id": oid, "risk_level": "high"}, topic="orders/risk_assessment_changed"
     )
     assert res["action"] != "auto_reject", res
 
@@ -386,8 +398,8 @@ async def test_workflow_writes_back_to_the_odoo_task(runtime, monkeypatch):
 
 # --------------------------------------------------------------------------
 # Path 1: inventory reconciliation - the OTHER AI workflow.
-# gather (real Odoo evidence) -> diagnose (fake AI) -> notify -> interrupt
-# -> apply (real Odoo stock write)
+# gather (real Odoo evidence) -> investigate (fake AI, read-only toolbelt)
+# -> propose (fake AI) -> notify -> interrupt -> apply (real Odoo stock write)
 # --------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_reconciliation_workflow_gathers_pauses_and_applies_to_odoo(runtime, monkeypatch):
@@ -407,6 +419,7 @@ async def test_reconciliation_workflow_gathers_pauses_and_applies_to_odoo(runtim
     snap = await runtime.reconciliation_graph.aget_state(cfg)
     assert snap.next, f"reconciliation did not pause at the interrupt (next={snap.next})"
     assert snap.values.get("discrepancy") is not None, "gather produced no discrepancy context"
+    assert snap.values.get("messages"), "investigation produced no transcript"
     assert await runtime.checkpointer.aget_tuple(cfg) is not None, "no checkpoint in Valkey"
     rec = await _read_task(runtime, task_id, ["state", "analysis"])
     assert rec["state"] == "pending_approval", rec

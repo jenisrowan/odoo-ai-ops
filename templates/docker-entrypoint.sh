@@ -106,6 +106,22 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Production bootstrap (idempotent) - create the database, install the
+# odoo_ai_ops module, and provision the agent's technical user. Runs whenever
+# the deployment injects the agent credentials (prod always does) or when
+# forced with ODOO_BOOTSTRAP=1; local dev sets neither, so nothing changes.
+# A bootstrap failure is fatal by design: the ECS deployment circuit breaker
+# turns it into an aborted + rolled-back deploy instead of a half-provisioned
+# instance.
+# ---------------------------------------------------------------------------
+if [ -n "${ODOO_AGENT_PASSWORD:-}" ] || [ "${ODOO_BOOTSTRAP:-}" = "1" ]; then
+    echo "[entrypoint] Running idempotent bootstrap (db / module / agent user)..."
+    python3 /odoo-bootstrap.py
+else
+    echo "[entrypoint] ODOO_AGENT_PASSWORD not set and ODOO_BOOTSTRAP != 1 - skipping bootstrap."
+fi
+
+# ---------------------------------------------------------------------------
 # Start Odoo via the upstream image entrypoint.
 # We run it in the background so this script (PID 1) remains the signal target.
 # The upstream /entrypoint.sh honours all env vars (HOST, PORT, USER, PASSWORD, …)

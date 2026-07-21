@@ -130,13 +130,29 @@ class AgentRuntime:
 
     async def resume(
         self, run_id: str, decision: str, manager_name: str | None = None, note: str | None = None
-    ) -> None:
-        """Resume a paused workflow with a manager's decision."""
+    ) -> bool:
+        """Resume a paused workflow with a manager's decision.
+
+        Returns ``True`` if the workflow was actually resumed. Unknown threads
+        and threads that already ran to completion are skipped (``False``):
+        SQS delivers at-least-once and a Slack card can be clicked twice, and
+        re-invoking a finished graph would re-execute its final nodes
+        (double-writing the decision to Odoo).
+        """
         graph = self._graph_for(run_id)
         config = {"configurable": {"thread_id": run_id}}
+        snapshot = await graph.aget_state(config)
+        if not snapshot.next:
+            logger.warning(
+                "Ignoring resume for %s: no paused workflow (unknown, already decided, "
+                "or expired from Valkey).",
+                run_id,
+            )
+            return False
         resume_value = {"decision": decision, "manager_name": manager_name, "note": note}
         await graph.ainvoke(Command(resume=resume_value), config=config)
         logger.info("Resumed workflow %s with decision=%s.", run_id, decision)
+        return True
 
     # ------------------------------------------------------------------
     # Event routing
@@ -180,9 +196,24 @@ class AgentRuntime:
 
         user = payload.get("user") or {}
         manager_name = user.get("name") or user.get("username")
-        await self.resume(
+        resumed = await self.resume(
             run_id, decision=decision, manager_name=manager_name, note="Decision via Slack"
         )
+        if not resumed and self.slack_client is not None:
+            # Tell the clicker why nothing happened (stale card / double click).
+            channel = (payload.get("channel") or {}).get("id")
+            ts = (payload.get("container") or {}).get("message_ts") or (
+                payload.get("message") or {}
+            ).get("ts")
+            if channel and ts:
+                try:
+                    await self.slack_client.post_text(
+                        "No action taken - this review was already decided or has expired.",
+                        channel=channel,
+                        thread_ts=ts,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("Failed to post the already-decided notice to Slack.")
 
     async def handle_sqs_message(self, body: dict) -> None:
         """Route a single SQS message body to the right handler.

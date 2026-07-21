@@ -18,13 +18,19 @@ RUN apt-get update && \
 COPY templates/patch_redis_session.py /patch_redis_session.py
 RUN python3 /patch_redis_session.py && rm /patch_redis_session.py
 
-# Copy the graceful-shutdown entrypoint script and fix line endings (Windows CRLF -> LF)
+# Bake the custom addons into the image at the path odoo.conf's addons_path
+# expects. (docker-compose bind-mounts the repo copy over this for live dev.)
+COPY custom_addons/ /mnt/extra-addons/
+
+# Copy the graceful-shutdown entrypoint and the idempotent bootstrap script,
+# and fix line endings (Windows CRLF -> LF)
 COPY templates/docker-entrypoint.sh /docker-entrypoint-custom.sh
-RUN sed -i 's/\r$//' /docker-entrypoint-custom.sh && \
+COPY templates/odoo-bootstrap.py /odoo-bootstrap.py
+RUN sed -i 's/\r$//' /docker-entrypoint-custom.sh /odoo-bootstrap.py && \
     chmod +x /docker-entrypoint-custom.sh
 
 # Ensure correct ownership
-RUN chown odoo:odoo /etc/odoo/odoo.conf
+RUN chown odoo:odoo /etc/odoo/odoo.conf && chown -R odoo:odoo /mnt/extra-addons
 
 USER odoo
 

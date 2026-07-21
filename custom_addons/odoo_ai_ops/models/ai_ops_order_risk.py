@@ -30,22 +30,19 @@ _logger = logging.getLogger(__name__)
 # Risk levels (normalised) that the cheap-order rule treats as "risky".
 RISKY_LEVELS = {"medium", "high"}
 
-# Severity ordering, used to pick the most severe when several assessments arrive.
-_RISK_SEVERITY = {"none": 0, "low": 1, "medium": 2, "high": 3}
-
-# Shopify expresses risk in a few shapes across API versions. Normalise them all
-# down to none/low/medium/high.
+# The lowercase JSON form of Shopify's RiskAssessmentResult enum
+# (NONE/LOW/MEDIUM/HIGH/PENDING) - the only values orders/risk_assessment_changed
+# delivers. "pending" means the assessment is still running, so it maps to
+# "none": act only on a delivered verdict. The dedup guard explicitly lets a
+# later risky assessment escalate a recorded benign one, so nothing is lost by
+# waiting. Unknown values also normalise to "none" (escalate-on-next-verdict
+# beats guessing).
 _RISK_ALIASES = {
+    "none": "none",
     "low": "low",
     "medium": "medium",
     "high": "high",
-    "none": "none",
-    # recommendation-style values
-    "accept": "low",
-    "investigate": "medium",
-    "cancel": "high",
-    # score buckets occasionally seen in assessments
-    "pending": "medium",
+    "pending": "none",
 }
 
 
@@ -64,66 +61,23 @@ class AiOpsOrderRisk(models.AbstractModel):
 
     @api.model
     def _extract(self, payload):
-        """Pull the fields we care about out of a tolerant payload shape.
+        """Pull the order identity + verdict out of the risk webhook body.
 
-        Accepts either a normalised envelope (``{order_id, order_name, total,
-        currency, risk_level}``) or a raw Shopify order/risk webhook body.
+        The real ``orders/risk_assessment_changed`` payload is small and flat
+        (verified against captured production deliveries - Shopify publishes no
+        sample for this topic)::
+
+            {"provider_id": ..., "provider_title": "...", "risk_level": "high",
+             "created_at": "...", "order_id": 123,
+             "admin_graphql_api_order_id": "gid://shopify/Order/123"}
+
+        It carries no order name, total, or currency; those are recovered from
+        the ``sale.order`` imported on ``orders/create``.
         """
-        order = payload.get("order") if isinstance(payload.get("order"), dict) else payload
-
-        order_id = (
-            payload.get("order_id") or order.get("id") or order.get("order_id") or order.get("admin_graphql_api_id")
-        )
-        order_name = payload.get("order_name") or order.get("name") or order.get("order_number")
-
-        raw_total = (
-            payload.get("total")
-            or order.get("current_total_price")
-            or order.get("total_price")
-            or order.get("total")
-            or 0.0
-        )
-        try:
-            total = float(raw_total)
-        except (TypeError, ValueError):
-            total = 0.0
-
-        currency = payload.get("currency") or order.get("currency") or order.get("presentment_currency")
-
-        # Risk can arrive as a flat level (``risk_level`` / ``riskLevel``), a
-        # recommendation, or a nested assessment object/list (the
-        # ``orders/risk_assessment_changed`` payload). Normalise them all.
-        risk_value = (
-            payload.get("risk_level") or payload.get("riskLevel") or order.get("risk_level") or order.get("riskLevel")
-        )
-        if not isinstance(risk_value, str):
-            assessment = (
-                order.get("risk_assessment")
-                or order.get("risk")
-                or payload.get("risk_assessment")
-                or payload.get("risk")
-                or {}
-            )
-            if isinstance(assessment, list):
-                # Several assessments (e.g. Shopify + a fraud app): take the worst.
-                levels = [
-                    self._normalize_risk(a.get("risk_level") or a.get("riskLevel") or a.get("recommendation"))
-                    for a in assessment
-                    if isinstance(a, dict)
-                ]
-                risk_value = max(levels, key=lambda lvl: _RISK_SEVERITY.get(lvl, 0)) if levels else None
-            elif isinstance(assessment, dict):
-                risk_value = (
-                    assessment.get("risk_level") or assessment.get("riskLevel") or assessment.get("recommendation")
-                )
-        risk_level = self._normalize_risk(risk_value)
-
+        order_id = payload.get("order_id")
         return {
             "order_id": str(order_id) if order_id is not None else False,
-            "order_name": order_name and str(order_name) or False,
-            "total": total,
-            "currency": currency,
-            "risk_level": risk_level,
+            "risk_level": self._normalize_risk(payload.get("risk_level")),
         }
 
     # ------------------------------------------------------------------
@@ -152,14 +106,11 @@ class AiOpsOrderRisk(models.AbstractModel):
         if info["order_id"]:
             sale_order = sale_order.search([("shopify_order_id", "=", info["order_id"])], limit=1)
 
-        total = info["total"]
-        total_known = bool(total)
-        if not total_known and sale_order:
-            total = sale_order.amount_total
-            total_known = True
+        total = sale_order.amount_total if sale_order else 0.0
+        total_known = bool(sale_order)
 
         # Surface the latest risk level on the order for at-a-glance visibility.
-        if sale_order and info["risk_level"]:
+        if sale_order:
             sale_order.shopify_risk_level = info["risk_level"]
 
         is_risky = info["risk_level"] in RISKY_LEVELS
@@ -209,17 +160,13 @@ class AiOpsOrderRisk(models.AbstractModel):
         # ir.config_parameter stores booleans as the strings "True"/"False".
         auto_reject = str(auto_reject).strip().lower() not in ("false", "0", "")
 
-        currency = self.env["res.currency"].search([("name", "=", info["currency"])], limit=1)
-        if not currency and sale_order:
-            currency = sale_order.currency_id
-
         base_vals = {
             "task_type": "fraud",
             "risk_level": info["risk_level"],
             "shopify_order_id": info["order_id"],
-            "shopify_order_name": info["order_name"] or (sale_order.shopify_order_name if sale_order else False),
+            "shopify_order_name": sale_order.shopify_order_name if sale_order else False,
             "order_total": total,
-            "currency_id": currency.id or self.env.company.currency_id.id,
+            "currency_id": (sale_order.currency_id.id if sale_order else False) or self.env.company.currency_id.id,
             "sale_order_id": sale_order.id or False,
             "payload": json.dumps(payload),
         }

@@ -80,6 +80,20 @@ class ResConfigSettings(models.TransientModel):
         "Webhooks' button subscribes orders/create and "
         "orders/risk_assessment_changed to this URL via the Admin API.",
     )
+    ai_ops_shopify_location_id = fields.Many2one(
+        "stock.location",
+        string="Shopify Stock Location",
+        config_parameter="odoo_ai_ops.shopify_stock_location_id",
+        domain="[('usage', 'in', ['internal', 'view'])]",
+        help="The Odoo location whose stock backs the Shopify sales channel "
+        "(child locations included). Reconciliation compares THIS location's "
+        "on-hand against Shopify's available quantity.\n\n"
+        "Leave empty only if every internal location feeds Shopify. In the "
+        "common shop + warehouse setup it must be set: Odoo's headline on-hand "
+        "sums both, so an unset mapping makes Odoo look permanently higher than "
+        "Shopify and the AI would keep 'correcting' Shopify upward - overselling "
+        "stock that is sitting in the back warehouse.",
+    )
     ai_ops_bypass_threshold = fields.Float(
         string="Auto-Reject Threshold",
         config_parameter="odoo_ai_ops.bypass_threshold",
@@ -149,16 +163,11 @@ class ResConfigSettings(models.TransientModel):
         )
         if not callback_url:
             raise UserError(
-                _(
-                    "Set the Shopify Webhook Callback URL first, e.g. "
-                    "https://<cloudfront-domain>/webhooks/shopify"
-                )
+                _("Set the Shopify Webhook Callback URL first, e.g. https://<cloudfront-domain>/webhooks/shopify")
             )
         try:
             client = ShopifyClient(
-                shop_domain=self._ai_ops_resolve(
-                    "ai_ops_shopify_shop_domain", "odoo_ai_ops.shopify_shop_domain"
-                ),
+                shop_domain=self._ai_ops_resolve("ai_ops_shopify_shop_domain", "odoo_ai_ops.shopify_shop_domain"),
                 # Secret: from Secrets Manager / SHOPIFY_ADMIN_TOKEN, never the UI.
                 admin_token=self._ai_ops_get_param("odoo_ai_ops.shopify_admin_token"),
                 api_version=self._ai_ops_resolve(

@@ -102,6 +102,7 @@ resource "aws_ecs_task_definition" "odoo" {
     integration_secret_arn = var.integration_secret_arn
     agent_base_url         = "http://fastapi:8000"
     shopify_api_version    = "2026-07"
+    odoo_agent_username    = var.odoo_agent_username
   })
 
   volume {

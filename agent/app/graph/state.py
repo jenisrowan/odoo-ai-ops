@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, TypedDict
+from typing import Annotated, Any, Literal, TypedDict
 
+from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 
 
@@ -30,6 +31,9 @@ class FraudState(TypedDict, total=False):
     order: dict[str, Any]
     model: str
     verdict: dict[str, Any]
+    # Where the approval card was posted, so finalize can update it in place.
+    slack_channel: str | None
+    slack_ts: str | None
     decision: str
     manager_name: str | None
     note: str | None
@@ -71,5 +75,14 @@ class ReconciliationState(TypedDict, total=False):
     context: dict[str, Any]
     discrepancy: dict[str, Any]
     proposal: dict[str, Any]
+    # Investigation transcript: the model's tool calls and their results. This
+    # is the evidence the verdict is drawn from, and it is checkpointed with
+    # the rest of the state so a resumed run keeps its reasoning.
+    messages: Annotated[list, add_messages]
+    # Number of investigate->tools round trips taken, against MAX_TOOL_LOOPS.
+    tool_loops: int
+    # Where the diagnosis was posted, so apply can confirm the outcome in-thread.
+    slack_channel: str | None
+    slack_ts: str | None
     decision: str
     manager_name: str | None

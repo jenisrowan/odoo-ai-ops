@@ -157,11 +157,54 @@ class OdooClient:
             [domain, fields, limit],
         )
 
-    async def warehouse_moves(self, product_id: int, limit=100) -> Any:
+    async def warehouse_moves(self, product_id: int, limit=100, states=None, kinds=None) -> Any:
         return await self.execute_kw(
             "ai.ops.inventory",
             "warehouse_moves",
-            [product_id, limit],
+            [product_id, limit, states, kinds],
+        )
+
+    async def stock_by_location(self, product_id: int) -> Any:
+        """Per-location on-hand: the 'moved to another warehouse' evidence."""
+        return await self.execute_kw(
+            "ai.ops.inventory",
+            "stock_by_location",
+            [product_id],
+        )
+
+    async def ledger_check(self, product_id: int) -> Any:
+        """Do the done moves add up to the on-hand? A gap means an untracked edit."""
+        return await self.execute_kw(
+            "ai.ops.inventory",
+            "ledger_check",
+            [product_id],
+        )
+
+    async def move_details(self, move_ids: list[int]) -> Any:
+        """Full detail (incl. the picking) for specific suspect stock moves."""
+        return await self.execute_kw(
+            "ai.ops.inventory",
+            "move_details",
+            [move_ids],
+        )
+
+    async def sale_order_lines(
+        self, product_id: int, limit: int = 20, only_undelivered: bool = False
+    ) -> Any:
+        return await self.execute_kw(
+            "ai.ops.inventory",
+            "sale_order_lines",
+            [product_id, limit, only_undelivered],
+        )
+
+    async def shopify_orders_for_sku(
+        self, product_id: int, limit: int = 20, since_days: int = 30
+    ) -> Any:
+        """Recent Shopify orders for the product's SKU (missing-sale evidence)."""
+        return await self.execute_kw(
+            "ai.ops.inventory",
+            "shopify_orders_for_sku",
+            [product_id, limit, since_days],
         )
 
     async def apply_inventory_patch(

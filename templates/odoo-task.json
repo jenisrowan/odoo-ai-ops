@@ -46,6 +46,10 @@
       {
         "name": "SHOPIFY_API_VERSION",
         "value": "${shopify_api_version}"
+      },
+      {
+        "name": "ODOO_AGENT_LOGIN",
+        "value": "${odoo_agent_username}"
       }
     ],
     "secrets": [
@@ -72,6 +76,10 @@
       {
         "name": "SHOPIFY_WEBHOOK_SECRET",
         "valueFrom": "${integration_secret_arn}:shopify_webhook_secret::"
+      },
+      {
+        "name": "ODOO_AGENT_PASSWORD",
+        "valueFrom": "${integration_secret_arn}:odoo_agent_password::"
       }
     ],
     "mountPoints": [

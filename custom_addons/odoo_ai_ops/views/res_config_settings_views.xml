@@ -53,6 +53,20 @@
                                 </div>
                             </div>
                         </setting>
+                        <setting string="Shopify Stock Location"
+                                 help="Which Odoo location backs the Shopify sales channel. Reconciliation compares this location's on-hand against Shopify. Required whenever some stock does NOT feed Shopify (e.g. a shop location that sells online plus a back warehouse that does not) - otherwise Odoo looks permanently higher and the AI would keep pushing that inflated number to Shopify.">
+                            <div class="content-group">
+                                <div class="row">
+                                    <label for="ai_ops_shopify_location_id" class="col-lg-4 o_light_label"/>
+                                    <field name="ai_ops_shopify_location_id"
+                                           options="{'no_create': True}"/>
+                                </div>
+                                <div class="text-muted mt4">
+                                    Child locations are included. Leave empty only if
+                                    <em>every</em> internal location feeds Shopify.
+                                </div>
+                            </div>
+                        </setting>
                         <setting string="Webhook Registration"
                                  help="Subscribe orders/create and orders/risk_assessment_changed to the edge ingress via the Admin API. Shopify's UI can't create HTTPS webhooks for a custom app. Idempotent - safe to re-run.">
                             <div class="content-group">

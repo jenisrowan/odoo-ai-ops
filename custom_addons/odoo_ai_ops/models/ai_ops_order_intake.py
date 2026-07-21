@@ -43,7 +43,11 @@ class AiOpsOrderIntake(models.AbstractModel):
     # ------------------------------------------------------------------
     @api.model
     def _extract_order_identity(self, order):
-        order_id = order.get("id") or order.get("order_id") or order.get("admin_graphql_api_id")
+        # "id" is a required field of the Order resource. It must stay the
+        # numeric id: the risk webhook correlates by numeric order_id, so
+        # storing anything else (e.g. the admin_graphql_api_id GID) would
+        # silently break the fraud correlation.
+        order_id = order.get("id")
         name = order.get("name")
         if not name and order.get("order_number"):
             name = "#%s" % order["order_number"]
@@ -75,7 +79,9 @@ class AiOpsOrderIntake(models.AbstractModel):
                 return partner
 
         country = self.env["res.country"]
-        code = addr.get("country_code") or addr.get("country")
+        # Only country_code is usable here: "country" is the full name
+        # ("United States") and can never match a res.country ISO code search.
+        code = addr.get("country_code")
         if code:
             country = country.search([("code", "=", str(code).upper())], limit=1)
 

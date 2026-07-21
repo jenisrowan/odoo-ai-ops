@@ -25,6 +25,21 @@ from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
 
+# Fraud-relevant top-level keys of the raw Shopify orders/create payload that
+# are forwarded to the agent (Slack card + LLM analysis). The full payload is
+# 15-20 KB of mostly fulfillment noise; this subset carries the actual fraud
+# signals: billing/shipping mismatch, contact details, account age, IP, and
+# payment route.
+_FRAUD_CONTEXT_KEYS = (
+    "created_at",
+    "email",
+    "phone",
+    "billing_address",
+    "shipping_address",
+    "client_details",
+    "payment_gateway_names",
+)
+
 
 class AiOpsTask(models.Model):
     _name = "ai.ops.task"
@@ -163,15 +178,69 @@ class AiOpsTask(models.Model):
     # ------------------------------------------------------------------
     # Agent dispatch (Odoo -> FastAPI)
     # ------------------------------------------------------------------
+    def _fraud_order_context(self):
+        """Assemble the order context the agent renders (Slack card) and analyzes (LLM).
+
+        The risk webhook stored on ``payload`` only identifies the order - it
+        carries no name, total, or order data - so the analysable context comes
+        from this task's correlated fields and the ``orders/create`` payload
+        preserved on the ``sale.order``. It is further enriched with Shopify's own
+        fraud analysis (risk facts, order history, AVS/CVV) fetched via GraphQL.
+        """
+        self.ensure_one()
+        context = {
+            "order_name": self.shopify_order_name or False,
+            "total": self.order_total,
+            "currency": self.currency_id.name,
+        }
+        try:
+            context["risk_assessment"] = json.loads(self.payload) if self.payload else {}
+        except (ValueError, TypeError):
+            context["risk_assessment"] = {}
+
+        raw = self.sale_order_id.shopify_raw_payload if self.sale_order_id else None
+        if raw:
+            try:
+                full = json.loads(raw)
+            except (ValueError, TypeError):
+                full = {}
+            details = {k: full[k] for k in _FRAUD_CONTEXT_KEYS if full.get(k) is not None}
+            customer = full.get("customer")
+            if isinstance(customer, dict):
+                details["customer"] = {
+                    k: customer.get(k) for k in ("first_name", "last_name", "email", "phone", "created_at", "state")
+                }
+            details["line_items"] = [
+                {k: item.get(k) for k in ("title", "sku", "quantity", "price")}
+                for item in full.get("line_items", [])
+                if isinstance(item, dict)
+            ]
+            context["order"] = details
+
+        # Enrich with Shopify's own fraud analysis: the risk-assessment facts
+        # (the "why" behind the level - already encoding the IP/proxy geolocation
+        # and velocity checks Shopify ran), the customer's order history, and card
+        # AVS/CVV results. The risk webhook carries none of this, so it is fetched
+        # here. Best-effort: a Shopify hiccup or unconfigured credentials must
+        # never block the fraud dispatch - the LLM/Slack card then run on the base
+        # context alone.
+        if self.shopify_order_id:
+            try:
+                context["shopify_risk"] = self._shopify_client().get_order_risk_context(
+                    self.shopify_order_id
+                )
+            except Exception as exc:  # noqa: BLE001 - enrichment must not block dispatch
+                _logger.warning(
+                    "AI Ops: could not fetch Shopify risk context for order %s: %s",
+                    self.shopify_order_id,
+                    exc,
+                )
+        return context
+
     def dispatch_fraud_workflow(self):
         """Hand the fraud-validation workflow off to the agent cluster."""
         self.ensure_one()
-        order = {}
-        if self.payload:
-            try:
-                order = json.loads(self.payload)
-            except (ValueError, TypeError):
-                order = {}
+        order = self._fraud_order_context()
         try:
             result = self._agent_client().start_fraud_workflow(
                 task_ref=self.name,

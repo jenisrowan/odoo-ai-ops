@@ -14,6 +14,7 @@ isolation; credentials are passed in by the caller (resolved from
 """
 
 import logging
+from datetime import date, timedelta
 
 import requests
 
@@ -58,6 +59,40 @@ query InventoryBySku($q: String!) {
             node {
               location { id name }
               quantities(names: ["available"]) { name quantity }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+# Recent orders containing a SKU. This is the evidence for the "Shopify sold it
+# but Odoo never recorded the sale" case: if Shopify shows a paid order for the
+# SKU with no matching Odoo sale order, Odoo is overstating its on-hand.
+# `sku:` is a supported filter on the orders search (Admin API 2026-07); the
+# line items still have to be filtered client-side because an order matches on
+# any of its SKUs and we only want the one under investigation.
+_ORDERS_BY_SKU_QUERY = """
+query OrdersBySku($q: String!, $first: Int!) {
+  orders(first: $first, query: $q, sortKey: CREATED_AT, reverse: true) {
+    edges {
+      node {
+        id
+        name
+        createdAt
+        cancelledAt
+        displayFinancialStatus
+        displayFulfillmentStatus
+        lineItems(first: 50) {
+          edges {
+            node {
+              sku
+              name
+              quantity
+              currentQuantity
+              unfulfilledQuantity
             }
           }
         }
@@ -125,6 +160,52 @@ mutation WebhookUpdate($id: ID!, $sub: WebhookSubscriptionInput!) {
 
 _SHOP_QUERY = """
 query { shop { name myshopifyDomain ianaTimezone } }
+"""
+
+
+# Pull Shopify's own fraud analysis for an order. The
+# orders/risk_assessment_changed webhook carries only the summarised risk level;
+# the underlying signals the fraud workflow needs live here:
+#   * risk.assessments[].facts - the "why" behind the level, each tagged with a
+#     NEGATIVE/NEUTRAL/POSITIVE sentiment; already encode Shopify's IP/proxy
+#     geolocation and order-velocity checks, so we do not reconstruct those.
+#   * customer.numberOfOrders / amountSpent - order history (a brand-new account
+#     is a strong fraud signal; supersedes the deprecated ordersCount/totalSpent).
+#   * transactions[].paymentDetails - card AVS/CVV verification results.
+# The legacy REST Order Risk resource was deprecated in 2024-04; this GraphQL
+# OrderRiskAssessment API is its replacement. Needs the read_orders scope.
+_ORDER_RISK_CONTEXT_QUERY = """
+query OrderRiskContext($id: ID!) {
+  order(id: $id) {
+    risk {
+      recommendation
+      assessments {
+        riskLevel
+        provider { title }
+        facts { description sentiment }
+      }
+    }
+    customer {
+      numberOfOrders
+      amountSpent { amount currencyCode }
+      verifiedEmail
+      createdAt
+    }
+    transactions(first: 10) {
+      kind
+      status
+      gateway
+      paymentDetails {
+        ... on CardPaymentDetails {
+          avsResultCode
+          cvvResultCode
+          bin
+          company
+        }
+      }
+    }
+  }
+}
 """
 
 
@@ -212,6 +293,82 @@ class ShopifyClient:
         if user_errors:
             raise ShopifyError("Shopify refused cancellation: %s" % user_errors)
         return result.get("job") or {}
+
+    # ------------------------------------------------------------------
+    # Fraud analysis context (used by the fraud-validation workflow)
+    # ------------------------------------------------------------------
+    def get_order_risk_context(self, order_id):
+        """Return Shopify's own fraud signals for an order as a flat dict.
+
+        Bundles the risk-assessment facts (with sentiment), the customer's order
+        history, and card AVS/CVV verification - the signals Shopify already
+        computed to flag the order, none of which the risk webhook carries. Shape::
+
+            {"recommendation": "INVESTIGATE",
+             "assessments": [{"risk_level": "HIGH", "provider": "Shopify",
+                              "facts": [{"description": "...", "sentiment": "NEGATIVE"}]}],
+             "customer_history": {"number_of_orders": "0", "amount_spent": "0.00",
+                                  "currency": "USD", "verified_email": False,
+                                  "created_at": "..."},
+             "payment_verification": [{"kind": "SALE", "status": "SUCCESS",
+                                       "avs_result": "N", "cvv_result": "N",
+                                       "card_company": "Visa", "bin": "424242"}]}
+
+        Returns ``{}`` if the order is unknown to Shopify.
+        """
+        data = self._execute(_ORDER_RISK_CONTEXT_QUERY, {"id": self.to_gid(order_id)})
+        order = (data or {}).get("order") or {}
+        if not order:
+            return {}
+
+        risk = order.get("risk") or {}
+        assessments = [
+            {
+                "risk_level": a.get("riskLevel"),
+                # provider is null when the assessment is Shopify's own.
+                "provider": (a.get("provider") or {}).get("title") or "Shopify",
+                "facts": [
+                    {"description": f.get("description"), "sentiment": f.get("sentiment")}
+                    for f in (a.get("facts") or [])
+                ],
+            }
+            for a in (risk.get("assessments") or [])
+        ]
+
+        customer = order.get("customer") or {}
+        amount_spent = customer.get("amountSpent") or {}
+
+        payment = []
+        for txn in order.get("transactions") or []:
+            details = txn.get("paymentDetails") or {}
+            # Only card transactions carry AVS/CVV; skip gift-card/other rows.
+            if details.get("avsResultCode") is None and details.get("cvvResultCode") is None:
+                continue
+            payment.append(
+                {
+                    "kind": txn.get("kind"),
+                    "status": txn.get("status"),
+                    "avs_result": details.get("avsResultCode"),
+                    "cvv_result": details.get("cvvResultCode"),
+                    "card_company": details.get("company"),
+                    "bin": details.get("bin"),
+                }
+            )
+
+        return {
+            "recommendation": risk.get("recommendation"),
+            "assessments": assessments,
+            "customer_history": {
+                "number_of_orders": customer.get("numberOfOrders"),
+                "amount_spent": amount_spent.get("amount"),
+                "currency": amount_spent.get("currencyCode"),
+                "verified_email": customer.get("verifiedEmail"),
+                "created_at": customer.get("createdAt"),
+            }
+            if customer
+            else {},
+            "payment_verification": payment,
+        }
 
     # ------------------------------------------------------------------
     # Webhook subscriptions (registered from the Odoo Settings UI)
@@ -315,6 +472,62 @@ class ShopifyClient:
                 if q.get("name") == "available":
                     total += float(q.get("quantity") or 0)
         return total
+
+    def list_orders_for_sku(self, sku, limit=20, since_days=30):
+        """Return recent Shopify orders containing ``sku``, newest first.
+
+        Answers "did Shopify sell this that Odoo never heard about?" — the
+        evidence behind the ``create_missing_sale_order`` resolution. Each row
+        carries only the line items for the requested SKU, plus the order's
+        financial and fulfillment status so a cancelled or unpaid order is not
+        mistaken for a real missing sale.
+
+        :param since_days: how far back to look; ``None`` for no date bound.
+        """
+        if not sku:
+            return []
+        terms = ['sku:"%s"' % str(sku).replace('"', "")]
+        if since_days:
+            # date/timedelta, not odoo.fields: this client is deliberately free
+            # of Odoo imports so it stays unit-testable in isolation.
+            cutoff = date.today() - timedelta(days=int(since_days))
+            terms.append("created_at:>=%s" % cutoff.isoformat())
+        data = self._execute(
+            _ORDERS_BY_SKU_QUERY,
+            {"q": " ".join(terms), "first": max(1, min(int(limit), 100))},
+        )
+        rows = []
+        for edge in ((data or {}).get("orders") or {}).get("edges") or []:
+            node = edge.get("node") or {}
+            lines = [
+                {
+                    "sku": ln.get("sku"),
+                    "name": ln.get("name"),
+                    "qty_ordered": ln.get("quantity"),
+                    # Excludes refunded/removed units - the number that actually
+                    # left the shelf.
+                    "qty_current": ln.get("currentQuantity"),
+                    "qty_unfulfilled": ln.get("unfulfilledQuantity"),
+                }
+                for ln in (
+                    e.get("node") or {}
+                    for e in ((node.get("lineItems") or {}).get("edges") or [])
+                )
+                if ln.get("sku") == sku
+            ]
+            if not lines:
+                continue
+            rows.append(
+                {
+                    "order": node.get("name"),
+                    "created_at": node.get("createdAt"),
+                    "cancelled_at": node.get("cancelledAt"),
+                    "financial_status": node.get("displayFinancialStatus"),
+                    "fulfillment_status": node.get("displayFulfillmentStatus"),
+                    "line_items": lines,
+                }
+            )
+        return rows
 
     def set_inventory_quantity(self, sku, qty, reason="correction", location_id=None):
         """Set the 'available' quantity for ``sku`` at a location.

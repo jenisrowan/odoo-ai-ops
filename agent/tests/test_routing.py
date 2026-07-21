@@ -33,13 +33,41 @@ async def test_slack_interaction_routes_to_resume():
 
 
 @pytest.mark.asyncio
+async def test_slack_interaction_stale_click_posts_notice():
+    """A click on an already-decided card must not resume; the clicker is told why."""
+    rt = _runtime()
+    rt.resume = AsyncMock(return_value=False)
+    rt.slack_client = MagicMock()
+    rt.slack_client.post_text = AsyncMock(return_value={"ok": True})
+    ctx = json.dumps({"odoo_task_id": 5, "thread_id": "fr-done", "task_ref": "AIOPS/1"})
+    payload = {
+        "type": "block_actions",
+        "user": {"name": "dana"},
+        "channel": {"id": "C123"},
+        "container": {"message_ts": "111.222"},
+        "actions": [{"action_id": "ai_ops_approve", "value": ctx}],
+    }
+    await rt.handle_slack_interaction(payload)
+    rt.slack_client.post_text.assert_awaited_once()
+    kwargs = rt.slack_client.post_text.await_args.kwargs
+    assert kwargs["channel"] == "C123"
+    assert kwargs["thread_ts"] == "111.222"
+
+
+@pytest.mark.asyncio
 async def test_sqs_shopify_message_forwards_to_odoo():
     rt = _runtime()
     rt.forward_webhook = AsyncMock(return_value={"action": "dispatched"})
     await rt.handle_sqs_message(
-        {"source": "shopify", "topic": "orders/risk_assessment_changed", "payload": {"order_id": "1"}}
+        {
+            "source": "shopify",
+            "topic": "orders/risk_assessment_changed",
+            "payload": {"order_id": "1"},
+        }
     )
-    rt.forward_webhook.assert_awaited_once_with({"order_id": "1"}, topic="orders/risk_assessment_changed")
+    rt.forward_webhook.assert_awaited_once_with(
+        {"order_id": "1"}, topic="orders/risk_assessment_changed"
+    )
 
 
 @pytest.mark.asyncio
@@ -97,3 +125,21 @@ def test_build_fraud_blocks_has_decision_buttons():
     value = json.loads(actions["elements"][0]["value"])
     assert value["thread_id"] == "fr-xyz"
     assert value["odoo_task_id"] == 7
+
+
+def test_build_fraud_blocks_with_decision_replaces_buttons():
+    """Once decided, the card must carry the outcome instead of live buttons."""
+    blocks = SlackClient.build_fraud_blocks(
+        task_ref="AIOPS/1",
+        odoo_task_id=7,
+        thread_id="fr-xyz",
+        order={"order_name": "#1001", "total": 250, "currency": "USD"},
+        risk_level="high",
+        verdict={"recommendation": "reject", "reasoning": "mismatch", "confidence": 0.9},
+        decision="reject",
+        manager_name="dana",
+    )
+    assert not [b for b in blocks if b["type"] == "actions"]
+    outcome = blocks[-1]["text"]["text"]
+    assert "Rejected" in outcome
+    assert "dana" in outcome

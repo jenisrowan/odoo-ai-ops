@@ -22,8 +22,18 @@ class TestOrderRiskGatekeeper(TransactionCase):
         cls.env["ir.config_parameter"].sudo().set_param("odoo_ai_ops.bypass_threshold", "10.0")
         cls.env["ir.config_parameter"].sudo().set_param("odoo_ai_ops.auto_reject_enabled", "True")
 
-    def _payload(self, total, risk, order_id="55501"):
-        return {"order_id": order_id, "order_name": "#1001", "total": total, "currency": "USD", "risk_level": risk}
+    def _risk(self, risk, order_id="55501"):
+        """The real ``orders/risk_assessment_changed`` shape (matches captured
+        production deliveries): flat, identity + verdict only - no order data.
+        Totals therefore always come from the correlated ``sale.order``."""
+        return {
+            "provider_id": 396934447105,
+            "provider_title": "Test Gatekeeper",
+            "risk_level": risk,
+            "created_at": "2026-07-15T01:14:33-04:00",
+            "order_id": order_id,
+            "admin_graphql_api_order_id": "gid://shopify/Order/%s" % order_id,
+        }
 
     def _make_order(self, total, order_id):
         """A draft sale.order correlated to a Shopify order id, worth ``total``."""
@@ -36,8 +46,9 @@ class TestOrderRiskGatekeeper(TransactionCase):
 
     def test_cheap_risky_order_is_auto_rejected(self):
         """< $10 and high risk -> bypass LLM, cancel in Shopify."""
+        self._make_order(7.5, "55501")
         with patch.object(type(self.Task), "_cancel_in_shopify", return_value=True) as mock_cancel:
-            result = self.Risk.process_webhook(self._payload(7.5, "high"))
+            result = self.Risk.process_webhook(self._risk("high", "55501"))
         self.assertEqual(result["action"], "auto_reject")
         self.assertTrue(result["shopify_cancelled"])
         mock_cancel.assert_called_once()
@@ -47,19 +58,36 @@ class TestOrderRiskGatekeeper(TransactionCase):
 
     def test_cheap_medium_risk_order_is_auto_rejected(self):
         """< $10 and medium risk also qualifies for the bypass."""
+        self._make_order(3.0, "55502")
         with patch.object(type(self.Task), "_cancel_in_shopify", return_value=True):
-            result = self.Risk.process_webhook(self._payload(3.0, "medium"))
+            result = self.Risk.process_webhook(self._risk("medium", "55502"))
         self.assertEqual(result["action"], "auto_reject")
+
+    def test_pending_assessment_waits_for_the_verdict(self):
+        """'pending' = assessment still running -> record only, act on the later verdict.
+
+        Mapping pending to a risky level would let the cheap-order bypass cancel
+        an order before Shopify has even finished analysing it.
+        """
+        self._make_order(5.0, "55506")
+        with patch.object(type(self.Task), "_cancel_in_shopify", return_value=True) as mock_cancel:
+            first = self.Risk.process_webhook(self._risk("pending", "55506"))
+            second = self.Risk.process_webhook(self._risk("high", "55506"))
+        self.assertEqual(first["action"], "ignored")
+        self.assertEqual(first["risk_level"], "none")
+        self.assertEqual(second["action"], "auto_reject")
+        mock_cancel.assert_called_once()
 
     def test_expensive_high_risk_order_is_dispatched(self):
         """>= $10 and high risk -> escalate to the agent, no Shopify cancel."""
+        self._make_order(149.0, "55503")
         with (
             patch.object(
                 type(self.Task), "dispatch_fraud_workflow", return_value={"run_id": "run-123"}
             ) as mock_dispatch,
             patch.object(type(self.Task), "_cancel_in_shopify") as mock_cancel,
         ):
-            result = self.Risk.process_webhook(self._payload(149.0, "high"))
+            result = self.Risk.process_webhook(self._risk("high", "55503"))
         self.assertEqual(result["action"], "dispatched")
         mock_dispatch.assert_called_once()
         mock_cancel.assert_not_called()
@@ -68,11 +96,12 @@ class TestOrderRiskGatekeeper(TransactionCase):
 
     def test_cheap_low_risk_order_is_ignored(self):
         """Cheap but only low risk -> recorded, not cancelled, not dispatched."""
+        self._make_order(2.0, "55504")
         with (
             patch.object(type(self.Task), "_cancel_in_shopify") as mock_cancel,
             patch.object(type(self.Task), "dispatch_fraud_workflow") as mock_dispatch,
         ):
-            result = self.Risk.process_webhook(self._payload(2.0, "low"))
+            result = self.Risk.process_webhook(self._risk("low", "55504"))
         self.assertEqual(result["action"], "ignored")
         mock_cancel.assert_not_called()
         mock_dispatch.assert_not_called()
@@ -80,10 +109,11 @@ class TestOrderRiskGatekeeper(TransactionCase):
     def test_auto_reject_disabled_falls_through_to_dispatch(self):
         """With the bypass disabled, even cheap risky orders go to the agent."""
         self.env["ir.config_parameter"].sudo().set_param("odoo_ai_ops.auto_reject_enabled", "False")
+        self._make_order(5.0, "55505")
         with patch.object(
             type(self.Task), "dispatch_fraud_workflow", return_value={"run_id": "run-9"}
         ) as mock_dispatch:
-            result = self.Risk.process_webhook(self._payload(5.0, "high"))
+            result = self.Risk.process_webhook(self._risk("high", "55505"))
         self.assertEqual(result["action"], "dispatched")
         mock_dispatch.assert_called_once()
 
@@ -110,9 +140,10 @@ class TestOrderRiskGatekeeper(TransactionCase):
 
     def test_duplicate_webhook_is_idempotent(self):
         """A redelivered order-risk webhook must not create a second task."""
+        self._make_order(7.5, "77001")
         with patch.object(type(self.Task), "_cancel_in_shopify", return_value=True) as mock_cancel:
-            first = self.Risk.process_webhook(self._payload(7.5, "high", order_id="77001"))
-            second = self.Risk.process_webhook(self._payload(7.5, "high", order_id="77001"))
+            first = self.Risk.process_webhook(self._risk("high", "77001"))
+            second = self.Risk.process_webhook(self._risk("high", "77001"))
         self.assertEqual(first["action"], "auto_reject")
         self.assertEqual(second["action"], "duplicate")
         self.assertEqual(second["task"], first["task"])
@@ -122,26 +153,23 @@ class TestOrderRiskGatekeeper(TransactionCase):
 
     def test_failed_task_does_not_block_reprocessing(self):
         """A failed dispatch may be retried when the webhook is redelivered."""
+        self._make_order(150.0, "77002")
         with patch.object(type(self.Task), "dispatch_fraud_workflow", return_value={"run_id": "r1"}) as mock_dispatch:
-            first = self.Risk.process_webhook(self._payload(150.0, "high", order_id="77002"))
+            first = self.Risk.process_webhook(self._risk("high", "77002"))
             self.Task.search([("name", "=", first["task"])]).write({"state": "failed"})
-            second = self.Risk.process_webhook(self._payload(150.0, "high", order_id="77002"))
+            second = self.Risk.process_webhook(self._risk("high", "77002"))
         self.assertEqual(second["action"], "dispatched")
         self.assertEqual(mock_dispatch.call_count, 2)
 
     # ------------------------------------------------------------------
-    # Correlation to the imported sale.order (risk-assessment webhook has no
-    # total, so it must be recovered from the order).
+    # Correlation to the imported sale.order (the risk-assessment webhook has
+    # no total, so it must be recovered from the order).
     # ------------------------------------------------------------------
-    def _risk_only(self, risk, order_id):
-        """A risk-assessment payload with NO total (the real Shopify shape)."""
-        return {"order_id": order_id, "risk_level": risk}
-
     def test_risk_total_recovered_from_sale_order(self):
         """No total in the payload -> read it from the correlated order (cheap)."""
         order = self._make_order(6.0, "RC-1")
         with patch.object(type(self.Task), "_cancel_in_shopify", return_value=True) as mock_cancel:
-            result = self.Risk.process_webhook(self._risk_only("high", "RC-1"))
+            result = self.Risk.process_webhook(self._risk("high", "RC-1"))
         self.assertEqual(result["action"], "auto_reject")
         self.assertEqual(result["order_total"], 6.0)
         self.assertTrue(result["order_cancelled"])
@@ -158,7 +186,7 @@ class TestOrderRiskGatekeeper(TransactionCase):
             patch.object(type(self.Task), "dispatch_fraud_workflow", return_value={"run_id": "r2"}) as mock_dispatch,
             patch.object(type(self.Task), "_cancel_in_shopify") as mock_cancel,
         ):
-            result = self.Risk.process_webhook(self._risk_only("high", "RC-2"))
+            result = self.Risk.process_webhook(self._risk("high", "RC-2"))
         self.assertEqual(result["action"], "dispatched")
         self.assertEqual(result["order_total"], 200.0)
         mock_dispatch.assert_called_once()
@@ -170,7 +198,7 @@ class TestOrderRiskGatekeeper(TransactionCase):
             patch.object(type(self.Task), "dispatch_fraud_workflow", return_value={"run_id": "r3"}) as mock_dispatch,
             patch.object(type(self.Task), "_cancel_in_shopify") as mock_cancel,
         ):
-            result = self.Risk.process_webhook(self._risk_only("high", "RC-NOORDER"))
+            result = self.Risk.process_webhook(self._risk("high", "RC-NOORDER"))
         self.assertEqual(result["action"], "dispatched")
         mock_dispatch.assert_called_once()
         mock_cancel.assert_not_called()
@@ -179,8 +207,8 @@ class TestOrderRiskGatekeeper(TransactionCase):
         """A later risky assessment must supersede an earlier low/no-risk one."""
         self._make_order(4.0, "RC-3")
         with patch.object(type(self.Task), "_cancel_in_shopify", return_value=True) as mock_cancel:
-            first = self.Risk.process_webhook(self._risk_only("low", "RC-3"))
-            second = self.Risk.process_webhook(self._risk_only("high", "RC-3"))
+            first = self.Risk.process_webhook(self._risk("low", "RC-3"))
+            second = self.Risk.process_webhook(self._risk("high", "RC-3"))
         self.assertEqual(first["action"], "ignored")
         self.assertEqual(second["action"], "auto_reject")
         mock_cancel.assert_called_once()
@@ -188,8 +216,8 @@ class TestOrderRiskGatekeeper(TransactionCase):
     def test_repeated_benign_assessment_is_deduped(self):
         """Two low assessments should not create two log tasks."""
         self._make_order(50.0, "RC-4")
-        first = self.Risk.process_webhook(self._risk_only("low", "RC-4"))
-        second = self.Risk.process_webhook(self._risk_only("none", "RC-4"))
+        first = self.Risk.process_webhook(self._risk("low", "RC-4"))
+        second = self.Risk.process_webhook(self._risk("none", "RC-4"))
         self.assertEqual(first["action"], "ignored")
         self.assertEqual(second["action"], "duplicate")
         self.assertEqual(len(self.Task.search([("shopify_order_id", "=", "RC-4")])), 1)

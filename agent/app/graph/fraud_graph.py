@@ -30,11 +30,19 @@ logger = logging.getLogger(__name__)
 _SYSTEM_PROMPT = (
     "You are a fraud-analysis assistant for an e-commerce operations team. "
     "Given a Shopify order flagged by the OrderRisk system, assess the "
-    "likelihood of fraud. Weigh signals such as billing/shipping mismatch, "
-    "high-value vs. account age, mismatched IP geolocation, unusual quantities, "
-    "and prior chargebacks. Be decisive but conservative: only recommend "
+    "likelihood of fraud. The order context includes Shopify's own analysis "
+    "under 'shopify_risk': weigh its 'facts' (each tagged NEGATIVE, NEUTRAL or "
+    "POSITIVE) heavily - they already encode Shopify's IP/proxy geolocation and "
+    "order-velocity checks - together with 'customer_history' (a brand-new "
+    "account with no prior orders is a red flag) and 'payment_verification' (an "
+    "AVS or CVV result of 'N' means the address or card security code did not "
+    "match). Also consider billing/shipping mismatch, order value vs. account "
+    "age, and unusual quantities. Be decisive but conservative: only recommend "
     "'reject' when signals strongly indicate fraud, 'approve' when the order "
-    "looks legitimate, and 'review' when genuinely ambiguous."
+    "looks legitimate, and 'review' when genuinely ambiguous. Keep 'reasoning' "
+    "to a concise report of about 50 words (60 maximum) telling the approving "
+    "manager what is wrong with this order, and list each concrete red flag in "
+    "'signals'."
 )
 
 
@@ -92,10 +100,11 @@ def build_fraud_graph(runtime):
             except Exception:  # noqa: BLE001 - don't lose the workflow on a transient error
                 logger.exception("[%s] failed to update Odoo task", thread_id)
 
-        # Post the interactive approval card.
+        # Post the interactive approval card. Remember where it landed so
+        # finalize can update it in place once the decision is made.
         if runtime.slack_client is not None:
             try:
-                await runtime.slack_client.post_fraud_card(
+                resp = await runtime.slack_client.post_fraud_card(
                     task_ref=state.get("odoo_task_ref"),
                     odoo_task_id=task_id,
                     thread_id=state.get("run_id"),
@@ -103,6 +112,8 @@ def build_fraud_graph(runtime):
                     risk_level=state.get("risk_level", "high"),
                     verdict=verdict,
                 )
+                if resp.get("ok"):
+                    return {"slack_channel": resp.get("channel"), "slack_ts": resp.get("ts")}
             except Exception:  # noqa: BLE001
                 logger.exception("[%s] failed to post Slack card", thread_id)
         return {}
@@ -126,19 +137,41 @@ def build_fraud_graph(runtime):
     async def finalize(state: FraudState) -> dict:
         task_id = state.get("odoo_task_id")
         decision = state.get("decision")
-        if task_id and decision in ("approve", "reject"):
-            try:
-                await runtime.odoo_client.set_approval(
-                    task_id=task_id,
-                    decision=decision,
-                    manager_name=state.get("manager_name"),
-                    note=state.get("note"),
-                    run_id=state.get("run_id"),
-                )
-            except Exception:  # noqa: BLE001
-                logger.exception(
-                    "[%s] failed to persist decision to Odoo", state.get("odoo_task_ref")
-                )
+        if decision in ("approve", "reject"):
+            if task_id:
+                try:
+                    await runtime.odoo_client.set_approval(
+                        task_id=task_id,
+                        decision=decision,
+                        manager_name=state.get("manager_name"),
+                        note=state.get("note"),
+                        run_id=state.get("run_id"),
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "[%s] failed to persist decision to Odoo", state.get("odoo_task_ref")
+                    )
+            # Close the Slack loop: swap the card's live buttons for the outcome
+            # so the channel sees who decided and a second click has no target.
+            if runtime.slack_client is not None and state.get("slack_ts"):
+                try:
+                    await runtime.slack_client.update_fraud_card(
+                        channel=state.get("slack_channel"),
+                        ts=state.get("slack_ts"),
+                        task_ref=state.get("odoo_task_ref"),
+                        odoo_task_id=task_id,
+                        thread_id=state.get("run_id"),
+                        order=state.get("order", {}),
+                        risk_level=state.get("risk_level", "high"),
+                        verdict=state.get("verdict", {}),
+                        decision=decision,
+                        manager_name=state.get("manager_name"),
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "[%s] failed to update Slack card with the decision",
+                        state.get("odoo_task_ref"),
+                    )
         logger.info("[%s] finalized with decision=%s", state.get("odoo_task_ref"), decision)
         return {}
 
