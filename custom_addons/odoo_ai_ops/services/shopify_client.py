@@ -509,10 +509,7 @@ class ShopifyClient:
                     "qty_current": ln.get("currentQuantity"),
                     "qty_unfulfilled": ln.get("unfulfilledQuantity"),
                 }
-                for ln in (
-                    e.get("node") or {}
-                    for e in ((node.get("lineItems") or {}).get("edges") or [])
-                )
+                for ln in (e.get("node") or {} for e in ((node.get("lineItems") or {}).get("edges") or []))
                 if ln.get("sku") == sku
             ]
             if not lines:

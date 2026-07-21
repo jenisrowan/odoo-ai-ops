@@ -226,9 +226,7 @@ class AiOpsTask(models.Model):
         # context alone.
         if self.shopify_order_id:
             try:
-                context["shopify_risk"] = self._shopify_client().get_order_risk_context(
-                    self.shopify_order_id
-                )
+                context["shopify_risk"] = self._shopify_client().get_order_risk_context(self.shopify_order_id)
             except Exception as exc:  # noqa: BLE001 - enrichment must not block dispatch
                 _logger.warning(
                     "AI Ops: could not fetch Shopify risk context for order %s: %s",

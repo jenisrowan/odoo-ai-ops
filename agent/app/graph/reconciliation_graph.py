@@ -246,9 +246,7 @@ def _build_tools(runtime):
         )
 
     @tool
-    async def list_shopify_orders(
-        product_id: int, limit: int = 20, since_days: int = 30
-    ) -> list:
+    async def list_shopify_orders(product_id: int, limit: int = 20, since_days: int = 30) -> list:
         """Recent Shopify orders containing this product's SKU, newest first,
         with each order's financial and fulfillment status. Compare against
         list_sale_order_lines to find a Shopify sale that Odoo never recorded —

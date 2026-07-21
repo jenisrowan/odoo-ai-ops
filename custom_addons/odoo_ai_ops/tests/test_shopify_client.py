@@ -321,9 +321,7 @@ class TestShopifyClient(TransactionCase):
                             {
                                 "node": {
                                     **o,
-                                    "lineItems": {
-                                        "edges": [{"node": ln} for ln in o.pop("_lines", [])]
-                                    },
+                                    "lineItems": {"edges": [{"node": ln} for ln in o.pop("_lines", [])]},
                                 }
                             }
                             for o in orders

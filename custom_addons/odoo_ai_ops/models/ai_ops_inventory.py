@@ -53,6 +53,7 @@ CATALOG_FIELDS = (
     "active",
 )
 
+
 def _move_kind(move):
     """Classify a stock.move by what actually happened to the stock.
 
@@ -299,10 +300,7 @@ class AiOpsInventory(models.AbstractModel):
         # over, so the two sides are actually comparable (see the docstring).
         actual = sum(
             self._access("stock.quant")
-            .search(
-                [("product_id", "=", product.id), ("location_id.usage", "=", "internal")]
-                + self._company_domain()
-            )
+            .search([("product_id", "=", product.id), ("location_id.usage", "=", "internal")] + self._company_domain())
             .mapped("quantity")
         )
         gap = actual - expected
@@ -323,8 +321,7 @@ class AiOpsInventory(models.AbstractModel):
                 "readonly field that Odoo only changes by journalling a move. It "
                 "means some code wrote stock.quant.quantity directly. Report the "
                 "inconsistency itself as the finding and escalate to a human; do "
-                "not try to explain the Shopify difference from it."
-                % (actual, expected, gap)
+                "not try to explain the Shopify difference from it." % (actual, expected, gap)
             )
         return result
 
@@ -387,9 +384,7 @@ class AiOpsInventory(models.AbstractModel):
         ids = [int(i) for i in (move_ids or [])][:MAX_LIMIT]
         if not ids:
             return []
-        moves = self._access("stock.move").search(
-            [("id", "in", ids)] + self._company_domain()
-        )
+        moves = self._access("stock.move").search([("id", "in", ids)] + self._company_domain())
         rows = self._serialize_moves(moves)
         by_id = {m.id: m for m in moves}
         for row in rows:
@@ -456,9 +451,7 @@ class AiOpsInventory(models.AbstractModel):
         if "sale.order.line" not in self.env:
             return []
         domain = [("product_id", "=", int(product_id))] + self._company_domain()
-        lines = self._access("sale.order.line").search(
-            domain, order="create_date desc", limit=self._clamp_limit(limit)
-        )
+        lines = self._access("sale.order.line").search(domain, order="create_date desc", limit=self._clamp_limit(limit))
         rows = []
         for line in lines:
             undelivered = line.product_uom_qty - line.qty_delivered
@@ -512,9 +505,7 @@ class AiOpsInventory(models.AbstractModel):
                 raise UserError("Location %s belongs to another company." % location.display_name)
         else:
             # Default to the company's main internal stock location.
-            warehouse = self._access("stock.warehouse").search(
-                [("company_id", "=", self.env.company.id)], limit=1
-            )
+            warehouse = self._access("stock.warehouse").search([("company_id", "=", self.env.company.id)], limit=1)
             location = warehouse.lot_stock_id
         if not location:
             raise UserError("Could not resolve a stock location for the adjustment.")
@@ -564,9 +555,7 @@ class AiOpsInventory(models.AbstractModel):
     @api.model
     def _shopify_location(self):
         """The Odoo location whose stock backs the Shopify channel, if declared."""
-        raw = self.env["res.config.settings"]._ai_ops_get_param(
-            "odoo_ai_ops.shopify_stock_location_id"
-        )
+        raw = self.env["res.config.settings"]._ai_ops_get_param("odoo_ai_ops.shopify_stock_location_id")
         if not raw:
             return self.env["stock.location"].browse()
         try:
@@ -601,8 +590,7 @@ class AiOpsInventory(models.AbstractModel):
                 "odoo_total_all_locations": total,
                 "note": (
                     "Compared %s only (child locations included). Odoo holds %s in "
-                    "total across all locations; the rest does not feed Shopify."
-                    % (location.display_name, total)
+                    "total across all locations; the rest does not feed Shopify." % (location.display_name, total)
                 ),
             }
 

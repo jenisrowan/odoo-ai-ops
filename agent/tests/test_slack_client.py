@@ -28,9 +28,7 @@ def _blocks(**over):
 
 def _text(blocks):
     """Flatten the mrkdwn/plain_text of every section-style block."""
-    return "\n".join(
-        b["text"]["text"] for b in blocks if isinstance(b.get("text"), dict)
-    )
+    return "\n".join(b["text"]["text"] for b in blocks if isinstance(b.get("text"), dict))
 
 
 def test_card_renders_reasoning_and_signals():
@@ -58,5 +56,11 @@ def test_card_keeps_signals_on_the_decided_card():
 
 
 def test_card_without_signals_omits_red_flags_section():
-    blocks = _blocks(verdict={"recommendation": "approve", "confidence": 0.7, "reasoning": "Looks fine.", "signals": []})
+    verdict = {
+        "recommendation": "approve",
+        "confidence": 0.7,
+        "reasoning": "Looks fine.",
+        "signals": [],
+    }
+    blocks = _blocks(verdict=verdict)
     assert "Red flags" not in _text(blocks)

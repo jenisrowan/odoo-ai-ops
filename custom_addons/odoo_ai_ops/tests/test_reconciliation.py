@@ -123,7 +123,7 @@ class TestDiscrepancyContext(TransactionCase):
         self.assertEqual(rows[0]["location_to_usage"], "customer")
 
     def test_manual_adjustment_is_surfaced_with_who_did_it(self):
-        """"Someone forcefully changed the on-hand qty" is a first-class cause.
+        """ "Someone forcefully changed the on-hand qty" is a first-class cause.
 
         Nothing else in the snapshot would reveal it, and the author is usually
         the whole answer.
@@ -152,9 +152,7 @@ class TestDiscrepancyContext(TransactionCase):
         ctx = self.Inventory.discrepancy_context(self.product.id, fetch_shopify=False)
         internal = ctx["pending_internal_moves"]
         self.assertIn(move.id, {m["id"] for m in internal})
-        self.assertEqual(
-            next(m["kind"] for m in internal if m["id"] == move.id), "internal_transfer"
-        )
+        self.assertEqual(next(m["kind"] for m in internal if m["id"] == move.id), "internal_transfer")
         # It must NOT be misfiled as a delivery to a customer.
         self.assertNotIn(move.id, {m["id"] for m in ctx["pending_outgoing_moves"]})
 
@@ -182,14 +180,10 @@ class TestDiscrepancyContext(TransactionCase):
             }
         )
         rows = self.Inventory.warehouse_moves(self.product.id, states=["draft"])
-        self.assertEqual(
-            next(r["kind"] for r in rows if r["id"] == outgoing.id), "outgoing"
-        )
+        self.assertEqual(next(r["kind"] for r in rows if r["id"] == outgoing.id), "outgoing")
         # Filtering to a kind that isn't present returns nothing rather than all.
         self.assertEqual(
-            self.Inventory.warehouse_moves(
-                self.product.id, states=["draft"], kinds=["internal_transfer"]
-            ),
+            self.Inventory.warehouse_moves(self.product.id, states=["draft"], kinds=["internal_transfer"]),
             [],
         )
 
@@ -231,9 +225,7 @@ class TestDiscrepancyContext(TransactionCase):
         the two together would report a phantom gap for perfectly consistent
         data, sending a human to chase a corruption that never happened.
         """
-        orphan = self.env["stock.location"].create(
-            {"name": "Unattached Internal", "usage": "internal"}
-        )
+        orphan = self.env["stock.location"].create({"name": "Unattached Internal", "usage": "internal"})
         self.assertFalse(orphan.warehouse_id, "fixture must be outside a warehouse tree")
         self.Inventory.apply_inventory_patch(self.product.id, 12.0, location_id=orphan.id)
 
@@ -243,17 +235,13 @@ class TestDiscrepancyContext(TransactionCase):
 
     def test_shopify_orders_without_sku_returns_an_error_row(self):
         """No SKU means no way to match in Shopify - say so, don't raise."""
-        product = self.env["product.product"].create(
-            {"name": "No SKU Widget", "is_storable": True}
-        )
+        product = self.env["product.product"].create({"name": "No SKU Widget", "is_storable": True})
         result = self.Inventory.shopify_orders_for_sku(product.id)
         self.assertIn("error", result)
 
     def test_shopify_orders_survive_a_shopify_outage(self):
         """A Shopify failure must degrade to evidence, not kill the workflow."""
-        with patch.object(
-            type(self.Inventory), "_shopify_client", side_effect=Exception("Shopify down")
-        ):
+        with patch.object(type(self.Inventory), "_shopify_client", side_effect=Exception("Shopify down")):
             result = self.Inventory.shopify_orders_for_sku(self.product.id)
         self.assertIn("error", result)
         self.assertIn("Shopify down", result["error"])
@@ -294,9 +282,7 @@ class TestShopifyLocationScope(TransactionCase):
         )
         # 5 in the shop (feeds Shopify), 100 out back (does not).
         cls.Inventory.apply_inventory_patch(cls.product.id, 5.0, location_id=cls.shop.id)
-        cls.Inventory.apply_inventory_patch(
-            cls.product.id, 100.0, location_id=cls.warehouse_back.id
-        )
+        cls.Inventory.apply_inventory_patch(cls.product.id, 100.0, location_id=cls.warehouse_back.id)
 
     def _set_location(self, location):
         self.env["ir.config_parameter"].sudo().set_param(
@@ -331,9 +317,7 @@ class TestShopifyLocationScope(TransactionCase):
             {"name": "Simple Widget", "is_storable": True, "default_code": "AIOPS-SIMPLE"}
         )
         self.Inventory.apply_inventory_patch(simple.id, 8.0, location_id=self.shop.id)
-        scope = self.Inventory.discrepancy_context(simple.id, fetch_shopify=False)[
-            "location_scope"
-        ]
+        scope = self.Inventory.discrepancy_context(simple.id, fetch_shopify=False)["location_scope"]
         self.assertNotIn("warning", scope)
         self.assertEqual(scope["stocked_internal_locations"], 1)
 
@@ -420,9 +404,7 @@ class TestAgentCredentialIsConstrained(TransactionCase):
         ctx = Inventory.discrepancy_context(self.product.id, fetch_shopify=False)
         self.assertIn(move.id, {m["id"] for m in ctx["pending_outgoing_moves"]})
         self.assertTrue(Inventory.move_details([move.id]))
-        self.assertTrue(
-            Inventory.query_catalog(domain=[("default_code", "=", "AIOPS-CRED")])
-        )
+        self.assertTrue(Inventory.query_catalog(domain=[("default_code", "=", "AIOPS-CRED")]))
 
     def test_the_gated_write_path_still_works(self):
         """Losing the manager role must not break the approved adjustment.
@@ -439,13 +421,13 @@ class TestAgentCredentialIsConstrained(TransactionCase):
                 "decision": "approve",
             }
         )
-        result = self.env["ai.ops.inventory"].with_user(self.agent).apply_inventory_patch(
-            self.product.id, 12.0, task_id=task.id
+        result = (
+            self.env["ai.ops.inventory"]
+            .with_user(self.agent)
+            .apply_inventory_patch(self.product.id, 12.0, task_id=task.id)
         )
         self.assertEqual(result["counted_qty"], 12.0)
-        self.assertEqual(
-            self.product.with_context(location=self.stock_loc.id).qty_available, 12.0
-        )
+        self.assertEqual(self.product.with_context(location=self.stock_loc.id).qty_available, 12.0)
 
     def test_the_rule_does_not_touch_other_users(self):
         """A global rule applies to everyone, so prove it is a no-op elsewhere."""
