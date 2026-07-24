@@ -42,7 +42,7 @@ docker run --rm --env-file .env -e RUN_SHOPIFY_LIVE_TESTS=1 \
 | `test_list_webhooks_is_readable` | read-only |
 | `test_inventory_read_best_effort` | read-only (skips if no SKU) |
 | `test_register_and_verify_webhooks` | **writes** — registers `orders/create` + `orders/risk_assessment_changed` HTTPS subscriptions on the store, idempotently |
-| `test_webhook_secret_signs_consistently` | offline — HMAC scheme sanity on `SHOPIFY_WEBHOOK_SECRET` |
+| `test_webhook_secret_verifies_real_shopify_signatures` | read-only — replays captured Shopify-signed deliveries through the production Lambda verifier to prove `SHOPIFY_WEBHOOK_SECRET` is the real one |
 | `test_cancel_order_destructive` | **destructive**, skipped unless `SHOPIFY_LIVE_TEST_ORDER_ID` is set |
 | `test_set_inventory_destructive` | **destructive**, skipped unless `SHOPIFY_LIVE_TEST_SKU` is set (restores the level afterward) |
 
@@ -51,6 +51,24 @@ docker run --rm --env-file .env -e RUN_SHOPIFY_LIVE_TESTS=1 \
 Defaults to `https://barterer-dusk-retold.ngrok-free.dev/webhooks/shopify` (the
 path mirrors the production edge route `POST /webhooks/{source}`). Override with
 `SHOPIFY_WEBHOOK_CALLBACK_URL`, or change just the host with `SHOPIFY_NGROK_BASE`.
+
+## The webhook secret
+
+HMAC is checked in exactly two places, once at each level:
+
+* **local** — `lambda/tests/test_handler.py` signs a realistically byte-shaped
+  Shopify body with a dummy secret and asserts the Lambda accepts it, rejects a
+  tampered one, and rejects a re-serialised one. No credentials, always runs.
+* **live** — `test_webhook_secret_verifies_real_shopify_signatures` (here) takes
+  the deliveries the edge shim captured in
+  `agent/tests/integration/captures/` and checks the `x-shopify-hmac-sha256`
+  header Shopify itself produced against `SHOPIFY_WEBHOOK_SECRET`, using the
+  Lambda's own `_verify_shopify`.
+
+The live one is the only test that can catch a *wrong secret* — signing and
+verifying with the same value passes whatever the value is. It skips when no
+captures exist, so run `run_edge_shim.sh` and let Shopify deliver at least once.
+If you rotate the secret in the Shopify admin, capture a fresh delivery.
 
 Registration only stores the subscription; it does not prove delivery. To watch a
 real delivery end-to-end locally you need something at the callback URL that

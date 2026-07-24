@@ -16,5 +16,12 @@ sys.path.insert(
 os.environ.setdefault("AWS_DEFAULT_REGION", "ap-south-1")
 os.environ.setdefault("SQS_QUEUE_URL", "https://sqs.test.local/queue")
 # _secret() falls back to KEY.upper() env vars when no INTEGRATION_SECRET_ARN.
-os.environ.setdefault("SHOPIFY_WEBHOOK_SECRET", "shpsecret")
-os.environ.setdefault("SLACK_SIGNING_SECRET", "slacksecret")
+#
+# Assigned, not setdefault: test_handler.py signs its fixtures with these exact
+# dummy values, so a real secret inherited from the environment (running under
+# `docker run --env-file .env`, say) would make every valid-signature test fail
+# with a 401 that looks like a handler bug. The unit tests must be hermetic.
+# test_captured_deliveries.py deliberately wants the real secret and sources it
+# from the repo .env itself.
+os.environ["SHOPIFY_WEBHOOK_SECRET"] = "shpsecret"
+os.environ["SLACK_SIGNING_SECRET"] = "slacksecret"

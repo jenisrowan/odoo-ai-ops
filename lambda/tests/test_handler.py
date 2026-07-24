@@ -26,6 +26,24 @@ def mock_sqs(monkeypatch):
     return m
 
 
+# A realistic `orders/create` body, byte-shaped the way Shopify actually sends
+# one: compact separators (no space after ':' or ','), escaped forward slashes in
+# the admin_graphql_api_id, and nested objects. Values are invented - only the
+# byte layout needs to be genuine, because that is all HMAC sees.
+#
+# Signing a hand-built dict via json.dumps instead would produce bytes Shopify
+# never emits (json.dumps adds spaces and leaves '/' unescaped), so the verifier
+# would only ever be tested against a shape it will not meet in production.
+SHOPIFY_RAW_BODY = (
+    '{"id":6937917718659,"admin_graphql_api_id":"gid:\\/\\/shopify\\/Order\\/6937917718659",'
+    '"app_id":396934447105,"currency":"USD","total_price":"250.00","email":"buyer@example.com",'
+    '"customer":{"id":8123456789,"first_name":"Ada","last_name":"Lovelace",'
+    '"email":"buyer@example.com"},'
+    '"line_items":[{"id":15987654321,"title":"Widget","sku":"SKU-1","quantity":1,'
+    '"price":"250.00"}],"test":true}'
+)
+
+
 def _shopify_sig(body, secret="shpsecret"):
     return base64.b64encode(
         hmac.new(secret.encode(), body.encode(), hashlib.sha256).digest()
@@ -41,12 +59,12 @@ def _slack_sig(body, ts, secret="slacksecret"):
 
 # --- Shopify ---------------------------------------------------------------
 def test_shopify_valid_hmac_enqueues(mock_sqs):
-    body = json.dumps({"id": 123, "total_price": "5.00"})
+    body = SHOPIFY_RAW_BODY
     event = {
         "pathParameters": {"source": "shopify"},
         "headers": {
             "x-shopify-hmac-sha256": _shopify_sig(body),
-            "x-shopify-topic": "orders/risk",
+            "x-shopify-topic": "orders/create",
         },
         "body": body,
     }
@@ -55,8 +73,29 @@ def test_shopify_valid_hmac_enqueues(mock_sqs):
     mock_sqs.send_message.assert_called_once()
     sent = json.loads(mock_sqs.send_message.call_args.kwargs["MessageBody"])
     assert sent["source"] == "shopify"
-    assert sent["topic"] == "orders/risk"
-    assert sent["payload"]["id"] == 123
+    assert sent["topic"] == "orders/create"
+    assert sent["payload"]["id"] == 6937917718659
+    assert sent["payload"]["line_items"][0]["sku"] == "SKU-1"
+
+
+def test_shopify_reserialized_body_fails_hmac(mock_sqs):
+    """Verification is byte-exact, not JSON-equal.
+
+    Re-encoding the same payload with ``json.dumps`` yields semantically
+    identical JSON with different bytes, and must not verify. This is the trap
+    behind "the secret looks wrong but isn't": always hash what arrived on the
+    wire, never a re-serialised parse of it.
+    """
+    reserialized = json.dumps(json.loads(SHOPIFY_RAW_BODY))
+    assert reserialized != SHOPIFY_RAW_BODY  # spacing + '/' escaping differ
+    event = {
+        "pathParameters": {"source": "shopify"},
+        "headers": {"x-shopify-hmac-sha256": _shopify_sig(SHOPIFY_RAW_BODY)},
+        "body": reserialized,
+    }
+    resp = handler.lambda_handler(event, None)
+    assert resp["statusCode"] == 401
+    mock_sqs.send_message.assert_not_called()
 
 
 def test_shopify_bad_hmac_rejected(mock_sqs):
@@ -72,7 +111,7 @@ def test_shopify_bad_hmac_rejected(mock_sqs):
 
 
 def test_base64_encoded_body(mock_sqs):
-    body = json.dumps({"id": 7})
+    body = SHOPIFY_RAW_BODY
     event = {
         "pathParameters": {"source": "shopify"},
         "headers": {"x-shopify-hmac-sha256": _shopify_sig(body)},
@@ -182,7 +221,7 @@ def test_unknown_source_rejected(mock_sqs):
 
 
 def test_source_detected_from_headers_when_no_path_param(mock_sqs):
-    body = json.dumps({"id": 9})
+    body = SHOPIFY_RAW_BODY
     event = {"headers": {"x-shopify-hmac-sha256": _shopify_sig(body)}, "body": body}
     resp = handler.lambda_handler(event, None)
     assert resp["statusCode"] == 200

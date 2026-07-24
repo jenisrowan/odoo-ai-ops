@@ -54,16 +54,15 @@ def _sign(body: bytes, secret: bytes = _WEBHOOK_SECRET) -> str:
     return base64.b64encode(hmac.new(secret, body, hashlib.sha256).digest()).decode()
 
 
-def _edge_verify(body: bytes, provided_sig: str) -> bool:
-    return hmac.compare_digest(_sign(body), provided_sig)
+def _edge_envelope(topic: str, payload: dict) -> dict:
+    """The SQS envelope the Lambda enqueues once a delivery has passed HMAC.
 
-
-def _edge_envelope(topic: str, payload: dict, secret: bytes = _WEBHOOK_SECRET) -> dict:
-    """Sign + verify like the Lambda, then build the SQS envelope it enqueues."""
-    body = json.dumps(payload).encode()
-    sig = _sign(body, secret)
-    if not _edge_verify(body, sig):
-        raise AssertionError("edge rejected the signature")
+    Signature verification itself is *not* re-implemented here - doing so would
+    only prove this file agrees with itself. The production verifier is covered
+    offline in ``lambda/tests/test_handler.py`` and against real Shopify-signed
+    bodies in the live suite; here we start from the post-verification envelope
+    and exercise everything downstream of it.
+    """
     return {"source": "shopify", "topic": topic, "payload": payload}
 
 
@@ -232,16 +231,35 @@ async def test_orders_create_is_idempotent_on_redelivery(runtime):
 
 @pytest.mark.asyncio
 async def test_edge_rejects_bad_signature_so_nothing_reaches_odoo(runtime):
-    """A payload signed with the wrong secret must never get past the edge."""
+    """A payload signed with the wrong secret must never get past the edge.
+
+    Posted over HTTP to the shim, which verifies with the *production* Lambda's
+    ``_verify_shopify``. That is the point of the test: it proves the real edge
+    drops forged traffic before Odoo sees it, which a locally re-implemented
+    signature check could never show.
+    """
+    async with httpx.AsyncClient(timeout=10) as c:
+        try:
+            await c.get(f"{_SHIM_URL}/healthz")
+        except Exception:
+            pytest.skip(f"edge shim not reachable at {_SHIM_URL} (run_edge_shim.sh)")
+
     oid = f"ITEST-{uuid.uuid4().hex[:10]}"
-    payload = _order(oid)
-    body = json.dumps(payload).encode()
-    forged = _sign(body, b"wrong-secret")
-    assert not _edge_verify(body, forged)
-    with pytest.raises(AssertionError):
-        _edge_envelope("orders/create", payload, secret=b"wrong-secret-2")
-    # nothing was forwarded, so Odoo has no such order
-    assert await _count_orders(runtime, oid) == 0
+    body = json.dumps(_order(oid)).encode()
+    forged = _sign(body, b"not-the-shopify-secret")
+
+    async with httpx.AsyncClient(timeout=30) as c:
+        r = await c.post(
+            f"{_SHIM_URL}/webhooks/shopify",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Shopify-Topic": "orders/create",
+                "X-Shopify-Hmac-Sha256": forged,
+            },
+        )
+    assert r.status_code == 401, f"edge accepted a forged signature: {r.status_code} {r.text}"
+    assert await _count_orders(runtime, oid) == 0, "forged delivery still reached Odoo"
 
 
 # --------------------------------------------------------------------------
@@ -259,7 +277,11 @@ async def test_low_risk_order_is_ignored(runtime):
 
 @pytest.mark.asyncio
 async def test_cheap_high_risk_order_is_auto_rejected(runtime):
-    """Cheap + risky => cancelled with zero LLM spend (the bypass rule)."""
+    """Cheap + risky => cancelled with zero LLM spend (the bypass rule).
+
+    The ``order_total`` assertion also covers total recovery: the risk payload
+    carries no total, so 5.0 can only have come from the correlated sale.order.
+    """
     oid = f"ITEST-{uuid.uuid4().hex[:10]}"
     await runtime.handle_sqs_message(_edge_envelope("orders/create", _order(oid, "5.00")))
     res = await runtime.forward_webhook(
@@ -279,17 +301,6 @@ async def test_expensive_high_risk_order_escalates_not_auto_rejected(runtime):
     )
     assert res["action"] != "auto_reject", res
     assert res["order_total"] == 250.0, res
-
-
-@pytest.mark.asyncio
-async def test_risk_webhook_without_total_recovers_it_from_the_order(runtime):
-    """The risk payload carries no total; it must be recovered from the sale.order."""
-    oid = f"ITEST-{uuid.uuid4().hex[:10]}"
-    await runtime.handle_sqs_message(_edge_envelope("orders/create", _order(oid, "5.00")))
-    res = await runtime.forward_webhook(
-        {"order_id": oid, "risk_level": "high"}, topic="orders/risk_assessment_changed"
-    )
-    assert res["order_total"] == 5.0, res
 
 
 @pytest.mark.asyncio

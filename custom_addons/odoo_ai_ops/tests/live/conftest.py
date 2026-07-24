@@ -21,6 +21,12 @@ _HERE = pathlib.Path(__file__).resolve()
 _REPO_ROOT = _HERE.parents[4]
 _CLIENT_PATH = _HERE.parents[2] / "services" / "shopify_client.py"
 
+# The HMAC test verifies real deliveries with the *production* Lambda code, so
+# the handler package has to be importable. It builds boto3 clients at import,
+# which needs a region but no credentials.
+_LAMBDA_DIR = _REPO_ROOT / "lambda" / "webhook_authorizer"
+_CAPTURES_DIR = _REPO_ROOT / "agent" / "tests" / "integration" / "captures"
+
 # Default local webhook target (an ngrok tunnel). Override with
 # SHOPIFY_WEBHOOK_CALLBACK_URL. Path mirrors the production edge route
 # (API Gateway `POST /webhooks/{source}`).
@@ -62,6 +68,26 @@ def client(shopify_mod):
         admin_token=os.environ["SHOPIFY_ADMIN_TOKEN"],
         api_version=os.environ.get("SHOPIFY_API_VERSION", "2026-07"),
     )
+
+
+@pytest.fixture(scope="session")
+def captures_dir() -> pathlib.Path:
+    """Where the edge shim writes raw Shopify deliveries."""
+    return _CAPTURES_DIR
+
+
+@pytest.fixture(scope="session")
+def lambda_handler_mod():
+    """The production ingest Lambda, imported with the real webhook secret in play."""
+    os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+    os.environ.setdefault("SQS_QUEUE_URL", "https://sqs.test.local/queue")
+    if str(_LAMBDA_DIR) not in sys.path:
+        sys.path.insert(0, str(_LAMBDA_DIR))
+    import handler  # noqa: PLC0415  (path must be set up first)
+
+    # _secret() caches per container and falls back to env; .env is already loaded.
+    handler._secret_cache = None
+    return handler
 
 
 @pytest.fixture(scope="session")

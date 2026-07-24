@@ -21,8 +21,6 @@ Safety:
 from __future__ import annotations
 
 import base64
-import hashlib
-import hmac
 import json
 import os
 
@@ -85,24 +83,39 @@ def test_register_and_verify_webhooks(client, callback_url, shopify_mod):
     assert not again["created"] and not again["updated"], f"second sync not idempotent: {again}"
 
 
-def test_webhook_secret_signs_consistently():
-    """The configured secret produces a stable Shopify-style HMAC (offline).
+def test_webhook_secret_verifies_real_shopify_signatures(captures_dir, lambda_handler_mod):
+    """The configured secret is the one Shopify actually signs with.
 
-    This validates the secret is usable for the same HMAC-SHA256/base64 scheme the
-    ingest Lambda verifies with; it cannot prove the secret matches Shopify's
-    without a Shopify-signed sample, but a tampered body must fail.
+    Every other HMAC test in the repo signs a body with a secret and verifies it
+    with the same secret. That proves the algorithm, but passes no matter what
+    ``SHOPIFY_WEBHOOK_SECRET`` is set to. The only way to prove the *value* is to
+    check it against something Shopify signed itself.
+
+    That is what the edge shim's captures give us: each one stores the raw body
+    Shopify sent (``raw_b64``) next to the ``x-shopify-hmac-sha256`` header it
+    sent with it. We replay them through the production Lambda verifier.
+
+    If this fails, the Lambda 401s every genuine delivery, the pipeline silently
+    drops all orders, and no other test in the repo notices. For an Admin-API
+    created subscription the secret is the custom app's API secret key.
     """
-    secret = os.environ.get("SHOPIFY_WEBHOOK_SECRET")
-    if not secret:
-        pytest.skip("SHOPIFY_WEBHOOK_SECRET not set")
-    body = json.dumps({"id": 1, "test": True}).encode()
-    digest = base64.b64encode(hmac.new(secret.encode(), body, hashlib.sha256).digest()).decode()
-    assert digest and hmac.compare_digest(
-        digest,
-        base64.b64encode(hmac.new(secret.encode(), body, hashlib.sha256).digest()).decode(),
-    )
-    tampered = base64.b64encode(hmac.new(secret.encode(), body + b"x", hashlib.sha256).digest()).decode()
-    assert not hmac.compare_digest(digest, tampered)
+    deliveries = _shopify_captures(captures_dir)
+    if not deliveries:
+        pytest.skip(
+            f"no captured Shopify deliveries in {captures_dir} - run "
+            "agent/tests/integration/run_edge_shim.sh and let Shopify deliver one"
+        )
+
+    for path, raw_body, signature in deliveries:
+        assert lambda_handler_mod._verify_shopify(raw_body, signature), (
+            f"SHOPIFY_WEBHOOK_SECRET does not match what Shopify signed {path.name} "
+            f"with - every live delivery would be rejected with 401"
+        )
+
+    # A real delivery with one byte added must fail, so the check above cannot be
+    # passing simply because the verifier accepts everything.
+    path, raw_body, signature = deliveries[0]
+    assert not lambda_handler_mod._verify_shopify(raw_body + " ", signature)
 
 
 # ---------------------------------------------------------------------------
@@ -154,3 +167,25 @@ def _first_sku(client):
             if sku:
                 return sku
     return None
+
+
+def _shopify_captures(captures_dir):
+    """Captured deliveries that carry a Shopify signature, as (path, raw, sig).
+
+    ``raw_b64`` holds the exact bytes Shopify signed. The parsed ``payload`` in
+    the same file cannot be used - re-serialising it changes the bytes (spacing,
+    escaped slashes) and would fail verification for reasons unrelated to the
+    secret. Slack captures are skipped; they have no Shopify header.
+    """
+    if not captures_dir.is_dir():
+        return []
+    found = []
+    for path in sorted(captures_dir.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        signature = (data.get("headers") or {}).get("x-shopify-hmac-sha256")
+        if data.get("raw_b64") and signature:
+            found.append((path, base64.b64decode(data["raw_b64"]).decode("utf-8"), signature))
+    return found

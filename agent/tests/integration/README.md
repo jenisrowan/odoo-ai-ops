@@ -51,6 +51,40 @@ MSYS_NO_PATHCONV=1 docker run --rm --network odoo-ai-ops_default --env-file .env
 `ODOO_DB=odoo_19` is the local database name; adjust if yours differs
 (`docker exec odoo-ai-ops-db-1 psql -U odoo -l`).
 
+## Live-LLM tests (`test_live_llm.py`) — these cost money
+
+`test_fullstack.py` fakes Anthropic's round-trip. `test_live_llm.py` is the
+other half: **real Claude calls**, graded, with the whole telemetry chain
+asserted — Valkey checkpoint → Langfuse trace → a GENERATION carrying the right
+model and non-zero token usage → the row in ClickHouse.
+
+It has its own flag on top of `RUN_INTEGRATION`, so a normal integration run
+never spends anything:
+
+```bash
+RUN_LIVE_LLM=1 SHOPIFY_LIVE_TEST_SKU=<a-real-store-sku> ./agent/tests/integration/run.sh
+```
+
+| Test | What it proves |
+|---|---|
+| `test_high_risk_order_gets_a_real_claude_verdict` | a payload full of planted red flags is not approved, the verdict cites them, high risk routes to the strong model, and the analysis lands on the Odoo task |
+| `test_clean_order_is_not_rejected` | the control — a clean order is not rejected, so "always reject" cannot pass the test above; medium risk routes to the cheap tier |
+| `test_reconciliation_investigates_and_finds_the_planted_cause` | the **investigation loop** actually runs (the fake short-circuits it after one turn, so this path has never otherwise executed): the model calls read-only tools, finds an inventory adjustment planted in Odoo, and its `direction` matches the arithmetic |
+
+The reconciliation test plants its own root cause: it baselines the Odoo count
+against whatever Shopify reports for the SKU, then forces the count up by 7 with
+a distinctive reason string. Odoo journals that as an `is_inventory` move
+carrying the reason, which is exactly what the model's toolbelt can find.
+
+**`SHOPIFY_LIVE_TEST_SKU` is what makes it cross-system.** With it, the Shopify
+side of the comparison is a real live quantity. Without it the SKU exists only
+in Odoo, Shopify reports nothing, the direction check is skipped, and the test
+is no longer reconciling two systems — it still runs, but it proves less.
+
+Reconciliation is the expensive one: a multi-turn loop on the strong model, up
+to `MAX_TOOL_LOOPS` (6) round trips plus the structured verdict. Each test
+prints its own token usage and cost.
+
 ## The edge shim (live Shopify webhooks, locally)
 
 `edge_shim.py` is the production HMAC Lambda's local stand-in. There is no

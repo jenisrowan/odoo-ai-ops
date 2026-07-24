@@ -5,6 +5,10 @@ output "odoo_service_name" { value = aws_ecs_service.odoo.name }
 output "fastapi_service_name" { value = aws_ecs_service.fastapi.name }
 output "clickhouse_capacity_provider_name" { value = aws_ecs_capacity_provider.clickhouse.name }
 
+# Log groups the observability module attaches error metric filters to.
+output "odoo_log_group_name" { value = aws_cloudwatch_log_group.odoo_logs.name }
+output "fastapi_log_group_name" { value = aws_cloudwatch_log_group.fastapi_logs.name }
+
 # Exposed for terraform test assertions (doc-critical instance families).
 output "odoo_instance_type" { value = var.odoo_instance_type }
 output "pgbouncer_instance_type" { value = var.pgbouncer_instance_type }

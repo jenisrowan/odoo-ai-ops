@@ -23,6 +23,8 @@ esac
 
 exec docker run --rm --network "$NETWORK" --env-file .env \
   -e RUN_INTEGRATION=1 \
+  -e "RUN_LIVE_LLM=${RUN_LIVE_LLM:-0}" \
+  -e "SHOPIFY_LIVE_TEST_SKU=${SHOPIFY_LIVE_TEST_SKU:-}" \
   -e LANGFUSE_HOST=http://langfuse-web:3000 -e LANGFUSE_BASE_URL=http://langfuse-web:3000 \
   -e VALKEY_URL=redis://redis:6379 \
   -e ODOO_BASE_URL=http://web:8069 -e "ODOO_DB=$ODOO_DB" -e ODOO_USERNAME=admin -e ODOO_PASSWORD=admin \

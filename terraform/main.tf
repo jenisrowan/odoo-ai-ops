@@ -162,4 +162,12 @@ module "observability" {
   webhook_queue_name           = module.webhooks.queue_name
   webhook_dlq_name             = module.webhooks.dlq_name
   webhook_lambda_function_name = module.webhooks.lambda_function_name
+
+  # Watch the two services that do the work. The Lambda is deliberately absent:
+  # it already has an Errors alarm off its own AWS/Lambda metric, so filtering
+  # its log would just page twice for the same failure.
+  error_log_groups = {
+    agent = module.ecs.fastapi_log_group_name
+    odoo  = module.ecs.odoo_log_group_name
+  }
 }

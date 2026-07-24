@@ -92,4 +92,61 @@ resource "aws_cloudwatch_metric_alarm" "service_down" {
   ok_actions          = local.alarm_actions
 }
 
+# --- Application errors ----------------------------------------------------
+#
+# The alarms above answer "is it running?". This one answers "is it working?",
+# which is a different question and the one that actually bites: a task can be
+# healthy, passing its health check and reporting RunningTaskCount = 1 while
+# failing every single request - a wrong database name, a rejected API key, an
+# expired token. None of the infrastructure metrics move at all in that state.
+#
+# What does move is the log: those failures surface as ERROR lines and Python
+# tracebacks. So we count them and alarm on the count.
+#
+# The metric is emitted with default_value = 0 so it reports zero while things
+# are healthy rather than going INSUFFICIENT_DATA between errors - otherwise the
+# alarm spends its life in a state that looks broken and gets ignored.
+locals {
+  error_metric_namespace = "${var.name_prefix}/Application"
+}
+
+resource "aws_cloudwatch_log_metric_filter" "errors" {
+  for_each = var.error_log_groups
+
+  name           = "${var.name_prefix}-${each.key}-errors"
+  log_group_name = each.value
+  pattern        = var.error_log_pattern
+
+  metric_transformation {
+    name          = "${each.key}ErrorCount"
+    namespace     = local.error_metric_namespace
+    value         = "1"
+    default_value = "0"
+    unit          = "Count"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "errors" {
+  for_each = var.error_log_groups
+
+  alarm_name        = "${var.name_prefix}-${each.key}-errors"
+  alarm_description = "Application errors in ${each.value} - the service is up but failing. Check the log group; Logs Insights across all groups will show the request that failed."
+
+  namespace   = local.error_metric_namespace
+  metric_name = aws_cloudwatch_log_metric_filter.errors[each.key].metric_transformation[0].name
+  statistic   = "Sum"
+
+  period              = 300
+  evaluation_periods  = 1
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = var.error_alarm_threshold
+  # No logs at all means no errors, not a breach - a quiet night is not an
+  # outage. Genuine "the service is gone" is covered by the service_down alarm.
+  treat_missing_data = "notBreaching"
+
+  alarm_actions = local.alarm_actions
+  ok_actions    = local.alarm_actions
+}
+
 output "sns_topic_arn" { value = aws_sns_topic.alerts.arn }
+output "error_alarm_names" { value = [for a in aws_cloudwatch_metric_alarm.errors : a.alarm_name] }
