@@ -42,7 +42,19 @@ _SYSTEM_PROMPT = (
     "looks legitimate, and 'review' when genuinely ambiguous. Keep 'reasoning' "
     "to a concise report of about 50 words (60 maximum) telling the approving "
     "manager what is wrong with this order, and list each concrete red flag in "
-    "'signals'."
+    "'signals'.\n\n"
+    "The order context has been privacy-redacted before it reached you: you will "
+    "not see the customer's name, full email address, phone number, street "
+    "address, coordinates or IP - do not ask for them or treat their absence as "
+    "suspicious. Instead you are given the fraud signal derived from them: "
+    "'email_domain' (a disposable or throwaway-mail domain is a weak negative "
+    "signal; an established provider is neutral), 'phone_dialling_code' (compare "
+    "it with the billing/shipping country - a phone from a different country than "
+    "the address is a red flag), each address as country/province/city/postcode, "
+    "and 'addresses_match' (whether billing and shipping are the same address, "
+    "street included). For anything IP- or location-based, rely on the "
+    "'shopify_risk' facts - they already encode Shopify's IP, proxy and "
+    "geolocation checks."
 )
 
 

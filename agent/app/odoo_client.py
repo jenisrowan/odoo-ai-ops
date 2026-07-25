@@ -150,6 +150,15 @@ class OdooClient:
             {"manager_name": manager_name, "note": note, "run_id": run_id},
         )
 
+    async def rehydrate_pii(self, text: str) -> Any:
+        """Swap pseudonym tokens (``Employee <id>``/``Customer <id>``) back to names.
+
+        Reconciliation evidence is pseudonymised in Odoo before it reaches the
+        LLM; this reverses it on the model's conclusion so the Slack card and the
+        Odoo task show real names. The id→name mapping stays inside Odoo.
+        """
+        return await self.execute_kw("ai.ops.inventory", "ai_ops_rehydrate", [text])
+
     async def query_catalog(self, domain=None, fields=None, limit=100) -> Any:
         return await self.execute_kw(
             "ai.ops.inventory",

@@ -72,9 +72,11 @@ This path is driven by **two** Shopify webhooks, because Shopify's fraud analysi
 0. **Order intake:** When an order is placed, Shopify's `orders/create` webhook is ingested (same Lambda → SQS path) and Odoo builds a **confirmed `sale.order`**, mapping the customer and line items and storing the full raw payload. Orders now live in Odoo with no separate connector.
 1. **Ingestion:** Later, Shopify's `orders/risk_assessment_changed` webhook sends the risk verdict to AWS API Gateway, which invokes a **Lambda proxy integration** that validates the HMAC signature (and answers Slack's challenge) synchronously and, on success, writes the verified payload to **Amazon SQS**.
 2. **Evaluation:** The **FastAPI agent** long-polls the SQS queue and forwards the verdict to Odoo's gatekeeper (Odoo itself never touches SQS), which correlates it back to the imported order (the risk webhook carries no total, so the order total is recovered from the `sale.order`). If the order is very cheap (< $10) and marked medium/high risk, Odoo auto-rejects it — cancelling it in **both Shopify and Odoo** — without spending LLM tokens. Otherwise, it triggers a LangGraph agent run via REST API.
-3. **Execution & Risk-Triage:**
+3. **Execution & Risk-Triage:** Before the order reaches the model, Odoo strips
+personal data from it (see [PII Redaction](#-pii-redaction-what-anthropic-never-sees)) — the agent
+and Anthropic only ever see the fraud *signal*, never the customer's identity.
 * *Medium Risk:* Agent uses **Claude Haiku** for fast, low-cost screening.
-* *High Risk:* Agent uses **Claude Sonnet** to cross-reference IPs, shipping histories, and billing addresses.
+* *High Risk:* Agent uses **Claude Sonnet** to cross-reference risk signals, shipping/billing region mismatch, and account history.
 
 
 4. **Human Gate:** The agent pauses execution, writes its active state to **Valkey**, and posts an interactive Block Kit card to Slack.
@@ -106,11 +108,53 @@ To reduce configuration complexity and minimize costs, this project utilizes a *
 
 ## 🔒 Security
 
-* **Zero-Knowledge Secrets Management:**
+### 🕵️ PII Redaction — what Anthropic never sees
+
+Fraud detection means sending customer data out to Anthropic Claude for analysis. To keep that
+compatible with **GDPR data-minimisation**, Odoo redacts personal data *before it leaves the box*:
+the full order stays in Odoo (the system of record), but the copy handed to the agent — and
+therefore to Anthropic — carries only the fraud signal, never anything that identifies a person.
+The rule is deliberately simple: **if GDPR treats a field as personal data, it does not go to
+Anthropic; everything else stays.**
+
+Crucially, redaction does not mean blanking a field — that would throw away the fraud signal. Each
+personal field is replaced by the signal derived from it while the raw value is still in hand:
+
+| Removed (personal data) | Sent instead (the signal, not the person) |
+| --- | --- |
+| Customer name | *(nothing — it carries no fraud signal)* |
+| Email address | **Email domain** — `@gmail.com` vs `@protonmail.com` is a real signal |
+| Phone number | **International dialling code** — a French address with a `+36` Hungarian phone is a red flag |
+| Street address (lines, house no.) | Country / province / city / postcode of each address, plus an **`addresses_match`** flag computed from the *full* addresses (street included) before the street is dropped |
+| Map coordinates (lat/long) | *(dropped)* |
+| Browser IP address | *(dropped — an IP is personal data under GDPR; Shopify's own risk facts already carry the IP/proxy/geolocation checks, so no signal is lost)* |
+| Session / device hash | *(dropped)* |
+
+Kept as-is, because none of it is personal data: order total, line items (title/SKU/qty/price),
+card scheme + BIN + AVS/CVV results, payment gateway, account facts (sign-up date, order count,
+whether the email is verified), and Shopify's own risk analysis.
+
+For the **inventory-reconciliation** workflow, the evidence names the staff member who changed a
+stock count and the customer on a delivery. Those are people too, so they are **pseudonymised**
+rather than dropped: each becomes a stable `Employee <id>` / `Customer <id>` token that Anthropic
+cannot resolve to a person, while the analysis can still reason "the same employee made both
+adjustments". Odoo keeps the id→name mapping and swaps the real names back in for the Slack card
+and the task record, so a manager sees no difference.
+
+* **Enforced in one place, before egress.** Redaction lives in Odoo
+(`custom_addons/odoo_ai_ops/services/pii.py`, applied by `ai.ops.task._fraud_order_context` and the
+`ai.ops.inventory` readers), so personal data never crosses the network to the agent, and never
+lands in the agent's logs or the LangGraph checkpoints in Valkey. The scrubber fails **closed**:
+address and browser fields are whitelisted, so an unrecognised (possibly identifying) field is
+dropped, not leaked.
+* **Tested against the real producer.** `tests/test_pii.py` asserts that
+`ai.ops.task._fraud_order_context` — the exact payload sent onward — contains no name, email, street,
+phone, IP or coordinates, so the guarantee breaks loudly if anyone later widens what Odoo forwards.
+
+### 🔑 Zero-Knowledge Secrets Management
+
 * **RDS Managed Passwords:** The master database password is automatically generated, encrypted, and managed natively by AWS. Plain-text credentials are **never** exposed or stored in the Terraform `tfstate` file.
 * **Direct Secret Injection:** ECS tasks use IAM Task Execution Roles to fetch credentials directly from AWS Secrets Manager at runtime.
-
-
 * **Network Isolation:** RDS and ElastiCache reside in private subnets, accepting traffic only from authorized ECS tasks.
 
 ---

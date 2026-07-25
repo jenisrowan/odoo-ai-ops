@@ -126,14 +126,23 @@ class TestDiscrepancyContext(TransactionCase):
         """ "Someone forcefully changed the on-hand qty" is a first-class cause.
 
         Nothing else in the snapshot would reveal it, and the author is usually
-        the whole answer.
+        the whole answer. The author is a person, so the snapshot the LLM sees
+        carries a pseudonym token, not the real name - but that token round-trips
+        back to the name through ai_ops_rehydrate, so the "who" is not lost.
         """
         self.Inventory.apply_inventory_patch(self.product.id, 42.0, reason="hand count")
         ctx = self.Inventory.discrepancy_context(self.product.id, fetch_shopify=False)
         adjustments = ctx["recent_inventory_adjustments"]
         self.assertTrue(adjustments, "a manual adjustment left no trace in the snapshot")
         self.assertEqual(adjustments[0]["kind"], "inventory_adjustment")
-        self.assertEqual(adjustments[0]["user"], self.env.user.display_name)
+        # Pseudonymised for the LLM: a token, never the real name.
+        token = adjustments[0]["user"]
+        self.assertEqual(token, "Employee %s" % self.env.user.id)
+        self.assertNotIn(self.env.user.display_name, token)
+        # ...but Odoo can put the real name back for the human-facing summary.
+        self.assertEqual(
+            self.Inventory.ai_ops_rehydrate(token), self.env.user.display_name
+        )
 
     def test_internal_transfer_is_surfaced(self):
         """A transfer between locations leaves total on-hand unchanged."""

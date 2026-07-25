@@ -19,26 +19,12 @@ import json
 import logging
 
 from odoo import _, api, fields, models
+from odoo.addons.odoo_ai_ops.services import pii
 from odoo.addons.odoo_ai_ops.services.agent_client import AgentClient, AgentError
 from odoo.addons.odoo_ai_ops.services.shopify_client import ShopifyClient, ShopifyError
 from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
-
-# Fraud-relevant top-level keys of the raw Shopify orders/create payload that
-# are forwarded to the agent (Slack card + LLM analysis). The full payload is
-# 15-20 KB of mostly fulfillment noise; this subset carries the actual fraud
-# signals: billing/shipping mismatch, contact details, account age, IP, and
-# payment route.
-_FRAUD_CONTEXT_KEYS = (
-    "created_at",
-    "email",
-    "phone",
-    "billing_address",
-    "shipping_address",
-    "client_details",
-    "payment_gateway_names",
-)
 
 
 class AiOpsTask(models.Model):
@@ -186,6 +172,11 @@ class AiOpsTask(models.Model):
         from this task's correlated fields and the ``orders/create`` payload
         preserved on the ``sale.order``. It is further enriched with Shopify's own
         fraud analysis (risk facts, order history, AVS/CVV) fetched via GraphQL.
+
+        Personal data is stripped here, before anything leaves Odoo: the order
+        block is passed through :func:`pii.redact_fraud_order`, so the agent (and
+        Anthropic) only ever see the fraud signal, never the customer's name,
+        email, phone, street, coordinates or IP. See ``services/pii.py``.
         """
         self.ensure_one()
         context = {
@@ -204,18 +195,13 @@ class AiOpsTask(models.Model):
                 full = json.loads(raw)
             except (ValueError, TypeError):
                 full = {}
-            details = {k: full[k] for k in _FRAUD_CONTEXT_KEYS if full.get(k) is not None}
-            customer = full.get("customer")
-            if isinstance(customer, dict):
-                details["customer"] = {
-                    k: customer.get(k) for k in ("first_name", "last_name", "email", "phone", "created_at", "state")
-                }
-            details["line_items"] = [
-                {k: item.get(k) for k in ("title", "sku", "quantity", "price")}
-                for item in full.get("line_items", [])
-                if isinstance(item, dict)
-            ]
-            context["order"] = details
+            # The webhook body is usually the order itself, but tolerate the
+            # ``{"order": {...}}`` envelope too (mirrors ai.ops.order.intake).
+            if isinstance(full, dict) and isinstance(full.get("order"), dict):
+                full = full["order"]
+            # redact_fraud_order derives the signal (email domain, dialling code,
+            # address regions, addresses_match, ...) and drops the personal data.
+            context["order"] = pii.redact_fraud_order(full)
 
         # Enrich with Shopify's own fraud analysis: the risk-assessment facts
         # (the "why" behind the level - already encoding the IP/proxy geolocation

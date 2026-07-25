@@ -12,6 +12,29 @@ under this single `Unreleased` heading, newest first within each category. The
 per-day development history is preserved in the git log. On the first release this
 block becomes `## [1.0.0] - <date>` and a fresh empty `Unreleased` opens above it.
 
+### Security
+- **PII redaction before anything reaches Anthropic (GDPR data-minimisation).** Fraud detection
+  sends order context out to Claude; that context is now stripped of personal data *inside Odoo,
+  before it leaves the box*. The governing rule: if GDPR treats a field as personal data it is not
+  sent, everything else is — and rather than blanking a field (which would lose the fraud signal),
+  each personal field is replaced by the signal derived from it: the email address becomes its
+  **domain** (`@gmail.com` vs `@protonmail.com`), the phone number becomes its **international
+  dialling code** (a French address with a `+36` phone is a red flag), the two addresses become
+  their country/province/city/postcode plus an **`addresses_match`** flag computed from the full
+  addresses (street included) before the street is dropped. Names, street lines, coordinates, the
+  browser IP and the session hash are dropped outright — the IP loses no signal because Shopify's
+  own risk facts already carry the IP/proxy/geolocation checks. New `services/pii.py` does the work
+  (applied by `ai.ops.task._fraud_order_context`); it fails **closed** — address and browser fields
+  are whitelisted, so an unrecognised field is dropped, not leaked.
+- **Reconciliation names are pseudonymised, not leaked.** The staff member who forced a stock count
+  and the customer on a delivery now reach the model as stable `Employee <id>` / `Customer <id>`
+  tokens (`ai.ops.inventory._serialize_moves` / `move_details`), so Anthropic cannot resolve them to
+  a person while the model can still correlate "same person did both". Odoo swaps the real names
+  back in via `ai.ops.inventory.ai_ops_rehydrate` for the Slack card and the task record, so a
+  manager sees no difference. `tests/test_pii.py` asserts the real producer emits no name, email,
+  street, phone, IP or coordinates, so the guarantee breaks loudly if the forwarded payload is ever
+  widened.
+
 ### Added
 - **Reconciliation is now an investigation, not a single guess**: the graph is
   `gather → investigate ⇄ tools → propose`, where Claude works the case with a read-only Odoo

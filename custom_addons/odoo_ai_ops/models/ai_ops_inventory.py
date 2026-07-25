@@ -23,6 +23,7 @@ way its credential can affect stock. See :meth:`AiOpsInventory._access`.
 import logging
 
 from odoo import api, fields, models
+from odoo.addons.odoo_ai_ops.services import pii
 from odoo.addons.odoo_ai_ops.services.shopify_client import ShopifyClient
 from odoo.exceptions import UserError, ValidationError
 
@@ -131,7 +132,11 @@ class AiOpsInventory(models.AbstractModel):
         """One move shape for every reader, so the model learns it once.
 
         ``user`` is the move's author: for an inventory adjustment that is the
-        person who forced the count, which is usually the whole answer.
+        person who forced the count, which is usually the whole answer. It is a
+        person, so it is pseudonymised to a stable ``Employee <id>`` token before
+        it can reach the LLM - the analysis can still correlate "same person did
+        both", but Anthropic never sees a name (see ``services/pii.py``). Odoo
+        swaps the real name back in via :meth:`ai_ops_rehydrate`.
         """
         rows = []
         for move in moves:
@@ -147,7 +152,7 @@ class AiOpsInventory(models.AbstractModel):
                 "location_from": move.location_id.display_name,
                 "location_to": move.location_dest_id.display_name,
                 "picking": move.picking_id.name or None,
-                "user": move.create_uid.display_name or None,
+                "user": pii.pseudonymise(pii.EMPLOYEE, move.create_uid.id) if move.create_uid else None,
             }
             if stale_cutoff is not None:
                 # An open move older than the threshold is a prime suspect
@@ -185,6 +190,29 @@ class AiOpsInventory(models.AbstractModel):
             raise UserError(
                 "Task %s was approved for product %s, not product %s." % (task.name, task.product_id.id, product_id)
             )
+
+    # ------------------------------------------------------------------
+    # Rehydration (undo the pseudonymisation for human-facing text)
+    # ------------------------------------------------------------------
+    @api.model
+    def ai_ops_rehydrate(self, text):
+        """Swap ``Employee <id>`` / ``Customer <id>`` tokens back to real names.
+
+        The reconciliation evidence sent to the LLM pseudonymises staff and
+        customer names (see :meth:`_serialize_moves`); the agent calls this on
+        the model's conclusion just before it is shown to a manager, so the Slack
+        card and the Odoo task record read with the real names. The id→name
+        mapping is resolved here, inside Odoo - it never leaves the box.
+        """
+        if not text:
+            return text
+
+        def _resolve(kind, record_id):
+            model = "res.users" if kind == pii.EMPLOYEE else "res.partner"
+            record = self._access(model).browse(record_id)
+            return record.display_name if record.exists() else None
+
+        return pii.rehydrate(text, _resolve)
 
     # ------------------------------------------------------------------
     # 1. Query catalog records
@@ -401,7 +429,11 @@ class AiOpsInventory(models.AbstractModel):
                         "state": picking.state,
                         "scheduled_date": str(picking.scheduled_date) if picking.scheduled_date else None,
                         "date_done": str(picking.date_done) if picking.date_done else None,
-                        "partner": picking.partner_id.display_name or None,
+                        # The delivery/receipt partner is a person: pseudonymise
+                        # to a token before it can reach the LLM (see _serialize_moves).
+                        "partner": pii.pseudonymise(pii.CUSTOMER, picking.partner_id.id)
+                        if picking.partner_id
+                        else None,
                         "backorder_of": picking.backorder_id.name or None,
                     }
                     if picking

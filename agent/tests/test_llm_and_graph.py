@@ -235,6 +235,51 @@ async def test_reconciliation_confirms_outcome_in_slack_thread(monkeypatch):
     assert "no_action" in confirm.args[0]
 
 
+@pytest.mark.asyncio
+async def test_reconciliation_rehydrates_names_before_a_human_sees_them(monkeypatch):
+    """The diagnosis shown to a human has pseudonym tokens swapped for real names.
+
+    The evidence the model reasoned over had names replaced with 'Employee <id>'
+    tokens; notify must call Odoo to put the real names back before the summary
+    lands on the Odoo task and the Slack card.
+    """
+    rt = _runtime()
+    rt.slack_client = AsyncMock()
+    rt.slack_client.post_text.return_value = {"ok": True, "channel": "C2", "ts": "2.2"}
+    rt.odoo_client.discrepancy_context.return_value = {"odoo_on_hand": 8, "shopify_available": 8}
+    # Odoo resolves the token back to the real name.
+    rt.odoo_client.rehydrate_pii.return_value = (
+        "Root cause: Alice Smith forced the count\n"
+        "Recommended action: no_action\nAlice Smith set it by hand."
+    )
+    verdict = ReconciliationVerdict(
+        direction="match",
+        root_cause="Employee 42 forced the count",
+        recommended_action="no_action",
+        corrected_odoo_qty=None,
+        shopify_target_qty=None,
+        suspect_move_ids=[],
+        reasoning="Employee 42 set it by hand.",
+        confidence=0.9,
+    )
+    monkeypatch.setattr(recon_mod, "get_chat_model", lambda name: _FakeChat(verdict))
+    rt.reconciliation_graph = recon_mod.build_reconciliation_graph(rt)
+
+    req = ReconciliationTaskRequest(
+        odoo_task_ref="AIOPS/8", odoo_task_id=8, product_id=2, context={}
+    )
+    await rt.start_reconciliation(req, run_id="rc-rehydrate")
+
+    # The tokenised summary was sent to Odoo to be de-tokenised...
+    rt.odoo_client.rehydrate_pii.assert_awaited_once()
+    assert "Employee 42" in rt.odoo_client.rehydrate_pii.await_args.args[0]
+    # ...and the real name (not the token) is what got stored and posted.
+    analysis = rt.odoo_client.register_agent_run.await_args.kwargs["analysis"]
+    assert "Alice Smith" in analysis
+    assert "Employee 42" not in analysis
+    assert "Alice Smith" in rt.slack_client.post_text.await_args.args[0]
+
+
 # --- the investigation loop -----------------------------------------------
 def _recon_verdict(**overrides):
     base = {
