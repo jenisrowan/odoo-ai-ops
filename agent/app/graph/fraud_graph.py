@@ -76,17 +76,11 @@ def build_fraud_graph(runtime):
             f"Order context (JSON):\n{order}\n\n"
             "Return your structured fraud assessment."
         )
-        config = {}
-        if runtime.langfuse_handler is not None:
-            config["callbacks"] = [runtime.langfuse_handler]
-            config["metadata"] = {
-                "odoo_task_ref": state.get("odoo_task_ref"),
-                "langfuse_session_id": state.get("odoo_task_ref"),
-                "risk_level": state.get("risk_level"),
-            }
-        verdict: FraudVerdict = await chat.ainvoke(
-            [("system", _SYSTEM_PROMPT), ("human", prompt)], config=config or None
-        )
+        # No Langfuse config is passed here on purpose. The handler and the
+        # session id are attached once at the graph invocation
+        # (``AgentRuntime._trace_config``) and LangGraph propagates them into
+        # this call, so the generation nests under the run's single trace.
+        verdict: FraudVerdict = await chat.ainvoke([("system", _SYSTEM_PROMPT), ("human", prompt)])
         logger.info(
             "[%s] analyze: recommendation=%s confidence=%.2f",
             state.get("odoo_task_ref"),

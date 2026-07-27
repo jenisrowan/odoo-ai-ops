@@ -797,7 +797,7 @@ class AiOpsInventory(models.AbstractModel):
     def push_inventory_to_shopify(self, product_id, qty, reason=None, task_id=None):
         """Set Shopify's available quantity for a product to ``qty``.
 
-        Used for the "Odoo has more stock — Shopify undercount / human error"
+        Used for the "Odoo has more stock - Shopify undercount / human error"
         resolution: Odoo is authoritative, so we correct Shopify. When called
         by the agent user, ``task_id`` must reference an ``ai.ops.task`` with a
         persisted *approve* decision (see :meth:`_require_approved_task`).

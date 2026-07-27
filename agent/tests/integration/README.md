@@ -3,7 +3,7 @@
 `test_fullstack.py` exercises the real webhook → agent → Odoo → Valkey → Langfuse
 → ClickHouse path against the **running `docker-compose` stack**, with the LLM
 faked (no Claude call, no cost). It is the answer to "what good is a test if the
-full stack isn't verified?" — it catches wiring/config bugs the mocked unit tests
+full stack isn't verified?" - it catches wiring/config bugs the mocked unit tests
 can't:
 
 * a signed Shopify `orders/create` is HMAC-verified by an edge shim (standing in
@@ -23,8 +23,19 @@ suite (it's skipped without the flag).
 
 1. The stack is up and healthy: `docker compose up -d`.
 2. `.env` has the Langfuse keys **without surrounding quotes** (`docker --env-file`
-   and compose `env_file` pass quotes literally — quoted keys 401).
+   and compose `env_file` pass quotes literally - quoted keys 401).
 3. The agent image is built (`odoo-ai-ops-agent`).
+4. Langfuse knows what our models cost. Its built-in price table stops at Claude
+   3.5, so without this every generation is scored at `$0` - token usage lands,
+   cost silently doesn't. Seed it once per project (idempotent, and needed
+   against the deployed Langfuse too, which ships the same table):
+
+   ```bash
+   docker run --rm --network odoo-ai-ops_default --env-file .env \
+     -e LANGFUSE_HOST=http://langfuse-web:3000 \
+     -v "$PWD/agent:/agent" python:3.12-slim \
+     python /agent/scripts/seed_langfuse_model_prices.py
+   ```
 
 ## Run it
 
@@ -51,11 +62,11 @@ MSYS_NO_PATHCONV=1 docker run --rm --network odoo-ai-ops_default --env-file .env
 `ODOO_DB=odoo_19` is the local database name; adjust if yours differs
 (`docker exec odoo-ai-ops-db-1 psql -U odoo -l`).
 
-## Live-LLM tests (`test_live_llm.py`) — these cost money
+## Live-LLM tests (`test_live_llm.py`) - these cost money
 
 `test_fullstack.py` fakes Anthropic's round-trip. `test_live_llm.py` is the
 other half: **real Claude calls**, graded, with the whole telemetry chain
-asserted — Valkey checkpoint → Langfuse trace → a GENERATION carrying the right
+asserted - Valkey checkpoint → Langfuse trace → a GENERATION carrying the right
 model and non-zero token usage → the row in ClickHouse.
 
 It has its own flag on top of `RUN_INTEGRATION`, so a normal integration run
@@ -68,7 +79,7 @@ RUN_LIVE_LLM=1 SHOPIFY_LIVE_TEST_SKU=<a-real-store-sku> ./agent/tests/integratio
 | Test | What it proves |
 |---|---|
 | `test_high_risk_order_gets_a_real_claude_verdict` | a payload full of planted red flags is not approved, the verdict cites them, high risk routes to the strong model, and the analysis lands on the Odoo task |
-| `test_clean_order_is_not_rejected` | the control — a clean order is not rejected, so "always reject" cannot pass the test above; medium risk routes to the cheap tier |
+| `test_clean_order_is_not_rejected` | the control - a clean order is not rejected, so "always reject" cannot pass the test above; medium risk routes to the cheap tier |
 | `test_reconciliation_investigates_and_finds_the_planted_cause` | the **investigation loop** actually runs (the fake short-circuits it after one turn, so this path has never otherwise executed): the model calls read-only tools, finds an inventory adjustment planted in Odoo, and its `direction` matches the arithmetic |
 
 The reconciliation test plants its own root cause: it baselines the Odoo count
@@ -79,7 +90,7 @@ carrying the reason, which is exactly what the model's toolbelt can find.
 **`SHOPIFY_LIVE_TEST_SKU` is what makes it cross-system.** With it, the Shopify
 side of the comparison is a real live quantity. Without it the SKU exists only
 in Odoo, Shopify reports nothing, the direction check is skipped, and the test
-is no longer reconciling two systems — it still runs, but it proves less.
+is no longer reconciling two systems - it still runs, but it proves less.
 
 Reconciliation is the expensive one: a multi-turn loop on the strong model, up
 to `MAX_TOOL_LOOPS` (6) round trips plus the structured verdict. Each test
@@ -97,7 +108,7 @@ local:  Shopify -> ngrok      ->        shim(HMAC)      ------> agent -> Odoo
 
 It **imports the real Lambda's `_verify_shopify`** (rather than reimplementing
 it) so it can't drift from prod, hands the *same envelope* to the agent's real
-`handle_sqs_message`, and Odoo still only ever sees the shared token — never an
+`handle_sqs_message`, and Odoo still only ever sees the shared token - never an
 HMAC. Every delivery (headers + raw body) is dumped to `captures/`, which is how
 we learn undocumented payload shapes (Shopify publishes no sample for
 `orders/risk_assessment_changed`).
@@ -109,7 +120,7 @@ ngrok http 9100                                     # keep the same ngrok domain
 ./agent/tests/integration/run_edge_shim.sh stop
 ```
 
-Shopify keeps posting to `https://<your-ngrok-domain>/webhooks/shopify` — only the
+Shopify keeps posting to `https://<your-ngrok-domain>/webhooks/shopify` - only the
 local port ngrok targets changes (9100 instead of 80).
 
 ### Slack (the HITL half)
@@ -128,7 +139,7 @@ secret you get `401` (the shim logs which).
 ### Driving a real risk assessment
 
 To drive a **real** risk assessment (no Shopify Payments needed), inject one with
-the Admin API — the REST `orders/{id}/risks.json` endpoint is retired, the modern
+the Admin API - the REST `orders/{id}/risks.json` endpoint is retired, the modern
 equivalent is:
 
 ```graphql

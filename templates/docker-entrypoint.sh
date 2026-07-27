@@ -55,7 +55,7 @@ _graceful_shutdown() {
 trap '_graceful_shutdown' SIGTERM SIGINT
 
 # ---------------------------------------------------------------------------
-# Master (super-admin) password — FAIL CLOSED.
+# Master (super-admin) password - FAIL CLOSED.
 # Odoo's config default for admin_passwd is the well-known string 'admin', and
 # the upstream entrypoint only maps the DB env vars (HOST/PORT/USER/PASSWORD) -
 # it never consumes ODOO_ADMIN_PASSWD. A weak/default master password exposes

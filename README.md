@@ -67,13 +67,13 @@ The infrastructure is deployed inside a multi-AZ AWS VPC.
 
 ### 1. Autonomous Fraud Detection (Shopify & Slack Integration)
 
-This path is driven by **two** Shopify webhooks, because Shopify's fraud analysis is asynchronous — the risk verdict is not available when the order is placed, it arrives once analysis completes (usually seconds, occasionally minutes).
+This path is driven by **two** Shopify webhooks, because Shopify's fraud analysis is asynchronous - the risk verdict is not available when the order is placed, it arrives once analysis completes (usually seconds, occasionally minutes).
 
 0. **Order intake:** When an order is placed, Shopify's `orders/create` webhook is ingested (same Lambda → SQS path) and Odoo builds a **confirmed `sale.order`**, mapping the customer and line items and storing the full raw payload. Orders now live in Odoo with no separate connector.
 1. **Ingestion:** Later, Shopify's `orders/risk_assessment_changed` webhook sends the risk verdict to AWS API Gateway, which invokes a **Lambda proxy integration** that validates the HMAC signature (and answers Slack's challenge) synchronously and, on success, writes the verified payload to **Amazon SQS**.
-2. **Evaluation:** The **FastAPI agent** long-polls the SQS queue and forwards the verdict to Odoo's gatekeeper (Odoo itself never touches SQS), which correlates it back to the imported order (the risk webhook carries no total, so the order total is recovered from the `sale.order`). If the order is very cheap (< $10) and marked medium/high risk, Odoo auto-rejects it — cancelling it in **both Shopify and Odoo** — without spending LLM tokens. Otherwise, it triggers a LangGraph agent run via REST API.
+2. **Evaluation:** The **FastAPI agent** long-polls the SQS queue and forwards the verdict to Odoo's gatekeeper (Odoo itself never touches SQS), which correlates it back to the imported order (the risk webhook carries no total, so the order total is recovered from the `sale.order`). If the order is very cheap (< $10) and marked medium/high risk, Odoo auto-rejects it - cancelling it in **both Shopify and Odoo** - without spending LLM tokens. Otherwise, it triggers a LangGraph agent run via REST API.
 3. **Execution & Risk-Triage:** Before the order reaches the model, Odoo strips
-personal data from it (see [PII Redaction](#-pii-redaction-what-anthropic-never-sees)) — the agent
+personal data from it (see [PII Redaction](#-pii-redaction-what-anthropic-never-sees)) - the agent
 and Anthropic only ever see the fraud *signal*, never the customer's identity.
 * *Medium Risk:* Agent uses **Claude Haiku** for fast, low-cost screening.
 * *High Risk:* Agent uses **Claude Sonnet** to cross-reference risk signals, shipping/billing region mismatch, and account history.
@@ -108,26 +108,26 @@ To reduce configuration complexity and minimize costs, this project utilizes a *
 
 ## 🔒 Security
 
-### 🕵️ PII Redaction — what Anthropic never sees
+### 🕵️ PII Redaction - what Anthropic never sees
 
 Fraud detection means sending customer data out to Anthropic Claude for analysis. To keep that
 compatible with **GDPR data-minimisation**, Odoo redacts personal data *before it leaves the box*:
-the full order stays in Odoo (the system of record), but the copy handed to the agent — and
-therefore to Anthropic — carries only the fraud signal, never anything that identifies a person.
+the full order stays in Odoo (the system of record), but the copy handed to the agent - and
+therefore to Anthropic - carries only the fraud signal, never anything that identifies a person.
 The rule is deliberately simple: **if GDPR treats a field as personal data, it does not go to
 Anthropic; everything else stays.**
 
-Crucially, redaction does not mean blanking a field — that would throw away the fraud signal. Each
+Crucially, redaction does not mean blanking a field - that would throw away the fraud signal. Each
 personal field is replaced by the signal derived from it while the raw value is still in hand:
 
 | Removed (personal data) | Sent instead (the signal, not the person) |
 | --- | --- |
-| Customer name | *(nothing — it carries no fraud signal)* |
-| Email address | **Email domain** — `@gmail.com` vs `@protonmail.com` is a real signal |
-| Phone number | **International dialling code** — a French address with a `+36` Hungarian phone is a red flag |
+| Customer name | *(nothing - it carries no fraud signal)* |
+| Email address | **Email domain** - `@gmail.com` vs `@protonmail.com` is a real signal |
+| Phone number | **International dialling code** - a French address with a `+36` Hungarian phone is a red flag |
 | Street address (lines, house no.) | Country / province / city / postcode of each address, plus an **`addresses_match`** flag computed from the *full* addresses (street included) before the street is dropped |
 | Map coordinates (lat/long) | *(dropped)* |
-| Browser IP address | *(dropped — an IP is personal data under GDPR; Shopify's own risk facts already carry the IP/proxy/geolocation checks, so no signal is lost)* |
+| Browser IP address | *(dropped - an IP is personal data under GDPR; Shopify's own risk facts already carry the IP/proxy/geolocation checks, so no signal is lost)* |
 | Session / device hash | *(dropped)* |
 
 Kept as-is, because none of it is personal data: order total, line items (title/SKU/qty/price),
@@ -148,7 +148,7 @@ lands in the agent's logs or the LangGraph checkpoints in Valkey. The scrubber f
 address and browser fields are whitelisted, so an unrecognised (possibly identifying) field is
 dropped, not leaked.
 * **Tested against the real producer.** `tests/test_pii.py` asserts that
-`ai.ops.task._fraud_order_context` — the exact payload sent onward — contains no name, email, street,
+`ai.ops.task._fraud_order_context` - the exact payload sent onward - contains no name, email, street,
 phone, IP or coordinates, so the guarantee breaks loudly if anyone later widens what Odoo forwards.
 
 ### 🔑 Zero-Knowledge Secrets Management
@@ -163,7 +163,7 @@ phone, IP or coordinates, so the guarantee breaks loudly if anyone later widens 
 
 ### Prerequisites
 
-* [Terraform](https://www.terraform.io/downloads.html) (>= 1.6 — `terraform/versions.tf` pins `~> 1.6`, and the native `terraform test` suites need 1.6+)
+* [Terraform](https://www.terraform.io/downloads.html) (>= 1.6 - `terraform/versions.tf` pins `~> 1.6`, and the native `terraform test` suites need 1.6+)
 * AWS CLI configured with appropriate permissions.
 * Docker (for building and pushing custom images to ECR).
 
@@ -175,7 +175,7 @@ phone, IP or coordinates, so the guarantee breaks loudly if anyone later widens 
    > `data` sources (`terraform/data.tf`), so they must already exist with every required key
    > populated or `terraform apply` fails. There is no rotation schedule attached to either;
    > rotation is a manual edit of the secret value. The one key with a propagation path is
-   > `odoo_agent_password` — the Odoo bootstrap re-applies it to the agent's user on every boot,
+   > `odoo_agent_password` - the Odoo bootstrap re-applies it to the agent's user on every boot,
    > so changing it in Secrets Manager takes effect on the next deploy (step 3). Every other key
    > is read at container start, so changing one requires a service restart to take effect.
 
@@ -205,12 +205,12 @@ phone, IP or coordinates, so the guarantee breaks loudly if anyone later widens 
 
    | Key | Required? | If unset / placeholder |
    | --- | --- | --- |
-   | `ai_ops_shared_token` | **Yes** | Odoo↔agent calls 401. Must be identical on both sides — it is one secret read by both tasks, so never override it per-service. |
+   | `ai_ops_shared_token` | **Yes** | Odoo↔agent calls 401. Must be identical on both sides - it is one secret read by both tasks, so never override it per-service. |
    | `anthropic_api_key` | **Yes** | No LLM calls; both workflows fail. |
    | `odoo_agent_password` | **Yes** | Bootstrap logs `skipping agent-user provisioning` and the agent cannot authenticate to Odoo at all. |
    | `shopify_shop_domain`, `shopify_admin_token` | **Yes** for stock + order paths | Reconciliation cannot read or push Shopify inventory; order cancellation fails. |
    | `shopify_webhook_secret` | **Yes** in production | Inbound webhook signatures cannot be verified. |
-   | `slack_bot_token`, `slack_signing_secret` | Optional | Slack stays disabled (`slack_enabled` needs the token **and** `SLACK_CHANNEL`, set via the `slack_channel` Terraform var — it is deliberately not baked in, so approval cards can't post to the wrong workspace); approvals then only exist on the Odoo task, with no card to click. |
+   | `slack_bot_token`, `slack_signing_secret` | Optional | Slack stays disabled (`slack_enabled` needs the token **and** `SLACK_CHANNEL`, set via the `slack_channel` Terraform var - it is deliberately not baked in, so approval cards can't post to the wrong workspace); approvals then only exist on the Odoo task, with no card to click. |
    | `langfuse_public_key`, `langfuse_secret_key` | Optional | Tracing disabled (`langfuse_enabled` also needs `LANGFUSE_HOST`); workflows run untraced. |
 
    The Shopify Admin API token needs `read_orders` (webhooks, fraud risk context, and the
@@ -218,7 +218,7 @@ phone, IP or coordinates, so the guarantee breaks loudly if anyone later widens 
    (reading Shopify's available quantity and pushing Odoo's on-hand back).
 
 2. **Initialize and Apply Terraform** (or run the `Build & Deploy` GitHub Action, which builds and
-   pushes all four images — odoo, nginx, fastapi, clickhouse — then applies):
+   pushes all four images - odoo, nginx, fastapi, clickhouse - then applies):
    ```bash
    cd terraform
    terraform init

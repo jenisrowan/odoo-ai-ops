@@ -20,7 +20,7 @@ locals {
 
 # --- Webhook pipeline ------------------------------------------------------
 
-# Anything in the DLQ means webhook processing failed repeatedly — high signal.
+# Anything in the DLQ means webhook processing failed repeatedly - high signal.
 resource "aws_cloudwatch_metric_alarm" "webhook_dlq_not_empty" {
   alarm_name          = "${var.name_prefix}-webhook-dlq-not-empty"
   alarm_description   = "Messages landed in the webhook dead-letter queue (processing is failing)."

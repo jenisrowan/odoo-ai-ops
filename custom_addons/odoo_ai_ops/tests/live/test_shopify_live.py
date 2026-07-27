@@ -119,7 +119,7 @@ def test_webhook_secret_verifies_real_shopify_signatures(captures_dir, lambda_ha
 
 
 # ---------------------------------------------------------------------------
-# Destructive — opt-in only (skipped unless a throwaway target is provided)
+# Destructive - opt-in only (skipped unless a throwaway target is provided)
 # ---------------------------------------------------------------------------
 @pytest.mark.skipif(
     not os.environ.get("SHOPIFY_LIVE_TEST_ORDER_ID"),

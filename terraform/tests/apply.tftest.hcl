@@ -1,19 +1,19 @@
-# Native `terraform test` — APPLY mode (real integration test).
+# Native `terraform test` - APPLY mode (real integration test).
 #
 # WARNING: this ACTUALLY provisions the full stack in the target AWS account,
-# runs the assertions, then tears it all down. It is opt-in only — run it
+# runs the assertions, then tears it all down. It is opt-in only - run it
 # deliberately via the manual "Terraform Test" workflow (mode = plan-and-apply);
 # it is never triggered on push, and it will incur real (short-lived) AWS cost.
 #
 # Isolation: it applies under a distinct name_prefix so prefixed resources won't
 # collide with a deployed "odoo" stack. NOTE the few fixed-name resources (ECR
 # repos: odoo-custom/nginx-custom/fastapi-agent/clickhouse-custom) are NOT
-# prefixed — run this in an account where those repos don't already exist (e.g.
+# prefixed - run this in an account where those repos don't already exist (e.g.
 # a clean/sandbox account), or the ECR creation will conflict.
 #
 # Prerequisites: valid AWS creds, the odoo/admin/password +
 # odoo/integration/credentials secrets present, and the S3 state backend
-# reachable (the test uses its own ephemeral state — it will not touch the real
+# reachable (the test uses its own ephemeral state - it will not touch the real
 # deployment's state).
 
 variables {

@@ -84,6 +84,50 @@ async def runtime():
         await rt.aclose()
 
 
+async def _remove_product(rt, product_id: int) -> None:
+    """Delete the planted product, falling back to archiving it.
+
+    Odoo refuses to unlink a product once stock moves reference it, and this
+    test plants inventory adjustments on purpose - so the fallback is the
+    normal path, not the exception. Archiving is good enough: Odoo's default
+    ``search`` excludes archived records, so the product stops turning up in
+    SKU lookups, which is the property the next run depends on.
+    """
+    try:
+        await rt.odoo_client.execute_kw("product.product", "unlink", [[product_id]])
+        return
+    except Exception:  # noqa: BLE001 - expected once the planted moves exist
+        pass
+    try:
+        await rt.odoo_client.execute_kw(
+            "product.product", "write", [[product_id], {"active": False}]
+        )
+    except Exception as exc:  # noqa: BLE001 - cleanup must never fail the test
+        print(f"\n[recon] WARNING: could not clean up product {product_id}: {exc}")
+
+
+@pytest_asyncio.fixture
+async def recon_product(runtime):
+    """Yield ``(product_id, marker)`` for a freshly planted product, then remove it.
+
+    Every run creates a product carrying ``SHOPIFY_LIVE_TEST_SKU``. Left behind,
+    those accumulate - and one SKU mapping to several Odoo products is exactly
+    the ambiguity the investigation is meant to reason about, so leaked products
+    from earlier runs quietly change what later runs are testing.
+    """
+    marker = uuid.uuid4().hex[:6].upper()
+    sku = os.environ.get("SHOPIFY_LIVE_TEST_SKU") or f"SKU-LIVE-{marker}"
+    product_id = await runtime.odoo_client.execute_kw(
+        "product.product",
+        "create",
+        [{"name": f"Live Recon {marker}", "default_code": sku, "is_storable": True}],
+    )
+    try:
+        yield product_id, marker
+    finally:
+        await _remove_product(runtime, product_id)
+
+
 # ---------------------------------------------------------------------------
 # Telemetry chain: agent -> Valkey -> Langfuse -> ClickHouse
 # ---------------------------------------------------------------------------
@@ -442,7 +486,7 @@ async def test_clean_order_is_not_rejected(runtime):
 # Scenario 2: stock reconciliation across Shopify and Odoo
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_reconciliation_investigates_and_finds_the_planted_cause(runtime):
+async def test_reconciliation_investigates_and_finds_the_planted_cause(runtime, recon_product):
     """The investigation loop, for real - the part the fake can never reach.
 
     We plant a cause in Odoo that is discoverable only by using the tools: an
@@ -457,15 +501,7 @@ async def test_reconciliation_investigates_and_finds_the_planted_cause(runtime):
     still runs, but it is no longer a cross-system reconciliation.
     """
     location_id = await _internal_location(runtime)
-    marker = uuid.uuid4().hex[:6].upper()
-    live_sku = os.environ.get("SHOPIFY_LIVE_TEST_SKU")
-    sku = live_sku or f"SKU-LIVE-{marker}"
-
-    product_id = await runtime.odoo_client.execute_kw(
-        "product.product",
-        "create",
-        [{"name": f"Live Recon {marker}", "default_code": sku, "is_storable": True}],
-    )
+    product_id, marker = recon_product
 
     # Baseline the Odoo count against whatever Shopify reports, so the only gap
     # is the one we plant. The plant moves the count UP: a surplus works from any

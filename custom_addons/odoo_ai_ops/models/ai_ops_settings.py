@@ -114,7 +114,7 @@ class ResConfigSettings(models.TransientModel):
         help="If enabled, Shopify order cancellations issued by AI Ops "
         "(auto-reject and manager rejections) also refund the payment. "
         "Disabled by default: fraud rejections usually should not "
-        "auto-refund — void or review the payment instead.",
+        "auto-refund - void or review the payment instead.",
     )
 
     @api.model

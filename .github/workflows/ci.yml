@@ -111,7 +111,7 @@ jobs:
 
       - name: Install & test the module inside the Odoo 19 image
         # DB config is passed via the HOST/PORT/USER/PASSWORD env vars the Odoo
-        # image entrypoint honors — passing --db_host is overridden by the
+        # image entrypoint honors - passing --db_host is overridden by the
         # entrypoint's default of "db" and would fail to resolve.
         run: |
           docker run --rm --network host \

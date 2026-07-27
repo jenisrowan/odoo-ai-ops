@@ -5,7 +5,7 @@ terraform {
   required_version = "~> 1.6"
 
   # Providers are exact-pinned here, and .terraform.lock.hcl (committed) records
-  # the matching checksums for every dev/CI platform — together they make every
+  # the matching checksums for every dev/CI platform - together they make every
   # init reproducible and tamper-evident.
   required_providers {
     aws = {

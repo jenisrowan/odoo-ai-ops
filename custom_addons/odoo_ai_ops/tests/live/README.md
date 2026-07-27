@@ -26,7 +26,7 @@ imports the parent Odoo package (`custom_addons/odoo_ai_ops/__init__.py` imports
 `odoo`, which isn't available under a bare `pytest`). That's also why there is no
 `__init__.py` here.
 
-In Docker (keeps secrets out of your shell history — `--env-file` injects `.env`):
+In Docker (keeps secrets out of your shell history - `--env-file` injects `.env`):
 
 ```bash
 docker run --rm --env-file .env -e RUN_SHOPIFY_LIVE_TESTS=1 \
@@ -38,11 +38,11 @@ docker run --rm --env-file .env -e RUN_SHOPIFY_LIVE_TESTS=1 \
 
 | Test | Effect |
 |---|---|
-| `test_credentials_and_connectivity` | read-only — token authenticates + resolves the store |
+| `test_credentials_and_connectivity` | read-only - token authenticates + resolves the store |
 | `test_list_webhooks_is_readable` | read-only |
 | `test_inventory_read_best_effort` | read-only (skips if no SKU) |
-| `test_register_and_verify_webhooks` | **writes** — registers `orders/create` + `orders/risk_assessment_changed` HTTPS subscriptions on the store, idempotently |
-| `test_webhook_secret_verifies_real_shopify_signatures` | read-only — replays captured Shopify-signed deliveries through the production Lambda verifier to prove `SHOPIFY_WEBHOOK_SECRET` is the real one |
+| `test_register_and_verify_webhooks` | **writes** - registers `orders/create` + `orders/risk_assessment_changed` HTTPS subscriptions on the store, idempotently |
+| `test_webhook_secret_verifies_real_shopify_signatures` | read-only - replays captured Shopify-signed deliveries through the production Lambda verifier to prove `SHOPIFY_WEBHOOK_SECRET` is the real one |
 | `test_cancel_order_destructive` | **destructive**, skipped unless `SHOPIFY_LIVE_TEST_ORDER_ID` is set |
 | `test_set_inventory_destructive` | **destructive**, skipped unless `SHOPIFY_LIVE_TEST_SKU` is set (restores the level afterward) |
 
@@ -56,22 +56,22 @@ path mirrors the production edge route `POST /webhooks/{source}`). Override with
 
 HMAC is checked in exactly two places, once at each level:
 
-* **local** — `lambda/tests/test_handler.py` signs a realistically byte-shaped
+* **local** - `lambda/tests/test_handler.py` signs a realistically byte-shaped
   Shopify body with a dummy secret and asserts the Lambda accepts it, rejects a
   tampered one, and rejects a re-serialised one. No credentials, always runs.
-* **live** — `test_webhook_secret_verifies_real_shopify_signatures` (here) takes
+* **live** - `test_webhook_secret_verifies_real_shopify_signatures` (here) takes
   the deliveries the edge shim captured in
   `agent/tests/integration/captures/` and checks the `x-shopify-hmac-sha256`
   header Shopify itself produced against `SHOPIFY_WEBHOOK_SECRET`, using the
   Lambda's own `_verify_shopify`.
 
-The live one is the only test that can catch a *wrong secret* — signing and
+The live one is the only test that can catch a *wrong secret* - signing and
 verifying with the same value passes whatever the value is. It skips when no
 captures exist, so run `run_edge_shim.sh` and let Shopify deliver at least once.
 If you rotate the secret in the Shopify admin, capture a fresh delivery.
 
 Registration only stores the subscription; it does not prove delivery. To watch a
 real delivery end-to-end locally you need something at the callback URL that
-mirrors production — verify the HMAC and forward to the agent → Odoo. In prod that
+mirrors production - verify the HMAC and forward to the agent → Odoo. In prod that
 is the API Gateway → Lambda → SQS → agent path; Odoo itself never sees the raw
 Shopify webhook, so don't point Shopify directly at Odoo.

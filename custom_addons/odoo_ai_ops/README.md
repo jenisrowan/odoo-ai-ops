@@ -32,9 +32,9 @@ arrive on two separate webhooks:
 `process_webhook` cancels an order **in both Shopify and Odoo with zero LLM
 spend** when *both* hold:
 
-* order total **<** `odoo_ai_ops.bypass_threshold` (default **$10**) — the risk
+* order total **<** `odoo_ai_ops.bypass_threshold` (default **$10**) - the risk
   webhook carries no total, so it is recovered from the correlated `sale.order`;
-  when the total is genuinely unknown the order is escalated, never auto-cancelled — and
+  when the total is genuinely unknown the order is escalated, never auto-cancelled - and
 * Shopify risk level is **medium** or **high**.
 
 Otherwise low/no-risk orders are recorded and closed, and everything else is
@@ -57,7 +57,7 @@ so secrets never need to be stored in the database):
 | `odoo_ai_ops.bypass_threshold` | - | default `10.0` |
 | `odoo_ai_ops.auto_reject_enabled` | - | default `True` |
 
-Secrets are **not** UI fields — they live once in AWS Secrets Manager
+Secrets are **not** UI fields - they live once in AWS Secrets Manager
 (`odoo/integration/credentials`) and reach Odoo as env vars, resolved at runtime
 via `os.environ` (never persisted to the database):
 
@@ -72,11 +72,11 @@ via `os.environ` (never persisted to the database):
 Shopify's web UI only offers Pub/Sub or EventBridge destinations for a **custom
 app**, so the plain HTTPS webhooks this integration needs must be created through
 the Admin API. Rather than a one-off script, this lives as a Settings action:
-set **Shopify Webhook Callback URL** (the edge ingress — CloudFront `/webhooks/shopify`,
+set **Shopify Webhook Callback URL** (the edge ingress - CloudFront `/webhooks/shopify`,
 Terraform output `webhook_url` + `/shopify`) and click **Register Shopify
 Webhooks** under **Settings → AI Ops → Shopify**. It subscribes `orders/create`
 and `orders/risk_assessment_changed` via `webhookSubscriptionCreate`, and is
-idempotent — re-running re-points a stale URL or does nothing if already set
+idempotent - re-running re-points a stale URL or does nothing if already set
 (`ShopifyClient.sync_webhooks`).
 
 > The webhook HMAC Shopify signs with is the **app's API secret key**; keep
@@ -110,13 +110,13 @@ boundary that does:
   no-ops for every other user.
 * **`ai.ops.inventory` is the only way through.** Its write methods elevate
   internally *after* `_require_approved_task` confirms a persisted *approve*
-  decision on a matching task, and `sudo()` bypasses record rules — so the gated
+  decision on a matching task, and `sudo()` bypasses record rules - so the gated
   path still works and is the only route from that credential to stock. Reads
   elevate too, with explicit company scoping (sudo bypasses the multi-company
   rule) and pinned field lists, so the readable surface is these methods rather
   than the models behind them.
 * **The agent still needs write on `ai.ops.task`** (`register_agent_run`,
-  `ai_ops_set_approval`) — that is how the Slack decision is persisted, and the
+  `ai_ops_set_approval`) - that is how the Slack decision is persisted, and the
   inventory gate reads it back. A literally zero-write credential would require
   moving the adjustment into Odoo itself, triggered by the decision.
 

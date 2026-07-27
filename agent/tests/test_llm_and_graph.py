@@ -390,7 +390,7 @@ async def test_a_failing_tool_does_not_kill_the_run(monkeypatch):
 def test_the_toolbelt_covers_every_root_cause():
     """Each cause a stock divergence actually has needs a tool behind it.
 
-    Without one, the model can name the cause and never gather evidence for it —
+    Without one, the model can name the cause and never gather evidence for it -
     which is how `create_missing_sale_order` sat in the verdict enum
     unsupportable for so long.
     """

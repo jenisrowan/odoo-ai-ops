@@ -6,7 +6,7 @@ reconciliation workflows send order/inventory context out to Anthropic for
 analysis. This module is the single place that decides what leaves the box.
 
 The rule is simple: **if GDPR treats a field as personal data, it does not go to
-Anthropic.** Everything else stays. The goal is to lose no fraud signal — so
+Anthropic.** Everything else stays. The goal is to lose no fraud signal - so
 rather than blanking a field outright we derive the signal that lives in it and
 send that instead:
 
@@ -17,7 +17,7 @@ send that instead:
 * the two addresses become their country / province / city / postcode plus an
   ``addresses_match`` flag worked out from the full addresses (street included)
   before the street is dropped;
-* the browser IP and session hash are dropped outright — an IP address is
+* the browser IP and session hash are dropped outright - an IP address is
   personal data under GDPR, and Shopify's own risk facts already carry the
   IP/proxy/geolocation checks, so no signal is lost.
 
@@ -287,7 +287,7 @@ def phone_dialling_code(phone):
     """Return the international dialling code of a phone number (e.g. ``"+36"``).
 
     Returns ``None`` for a number in national format (no ``+`` or ``00``
-    prefix), because such a number carries no country information at all — there
+    prefix), because such a number carries no country information at all - there
     is nothing to compare against the address, and nothing identifying to keep.
     """
     if not phone:

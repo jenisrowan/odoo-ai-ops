@@ -1,24 +1,24 @@
 """Inventory-reconciliation LangGraph workflow (Path 1 in the architecture).
 
 Goal: explain *why* Odoo and Shopify stock disagree for a product, and propose
-the right fix — not just guess a number.
+the right fix - not just guess a number.
 
 Flow::
 
     gather ─► investigate ⇄ tools ─► propose ─► notify ─► await_decision ─(interrupt)─► apply ─► END
 
-* **gather** — deterministic evidence floor: one ``discrepancy_context`` call so
+* **gather** - deterministic evidence floor: one ``discrepancy_context`` call so
   the Slack card always has real numbers even if the model asks nothing further.
-* **investigate** — Claude works the case with a read-only Odoo toolbelt. Unlike
+* **investigate** - Claude works the case with a read-only Odoo toolbelt. Unlike
   fraud triage (a single judgement over a payload already in hand), diagnosing a
   stock divergence is a real investigation: the second question depends on the
   first answer, so the path is not linear.
-* **propose** — collapse the investigation transcript into a structured
+* **propose** - collapse the investigation transcript into a structured
   :class:`ReconciliationVerdict` (direction, root cause, recommended action).
-* **notify** — surface the diagnosis to a manager via Slack; mark the task
+* **notify** - surface the diagnosis to a manager via Slack; mark the task
   ``pending_approval``.
-* **await_decision** — ``interrupt()`` until a human approves/rejects.
-* **apply** — on approval, execute the recommended action (push Odoo's on-hand
+* **await_decision** - ``interrupt()`` until a human approves/rejects.
+* **apply** - on approval, execute the recommended action (push Odoo's on-hand
   to Shopify, adjust Odoo, or leave it for a human to investigate a stuck move).
 
 Safety
@@ -26,8 +26,8 @@ Safety
 **The model never gets a write tool.** The toolbelt is read-only; ``apply``
 stays plain Python that executes the enum in ``recommended_action`` and nothing
 else. So the model's output is a *proposal in a closed vocabulary*, never a
-call. That matters because the evidence it reads is attacker-influenced — a
-product name, an order note, a Shopify field — and a write tool would put
+call. That matters because the evidence it reads is attacker-influenced - a
+product name, an order note, a Shopify field - and a write tool would put
 "model was talked into it" one prompt injection away from moving stock, with
 only the Slack card standing in the way. Here the worst case is a wrong number
 on one approved product, which a human sees before it lands.
@@ -65,7 +65,7 @@ _INVESTIGATE_PROMPT = (
     "on-hand quantity in Odoo disagrees with the 'available' quantity in "
     "Shopify. You have read-only tools against the Odoo database. Work the case: "
     "start from the discrepancy snapshot you were given, then call tools to test "
-    "your hypotheses — drill into any move that looks stuck or aged, check who "
+    "your hypotheses - drill into any move that looks stuck or aged, check who "
     "made a manual inventory adjustment and why, see where the stock actually "
     "sits across locations and warehouses, widen the sale-order history, "
     "cross-check Shopify's own orders for the SKU against Odoo's, check whether "
@@ -73,7 +73,7 @@ _INVESTIGATE_PROMPT = (
     "look up.\n\n"
     "Stop calling tools once you can name the single most likely root cause and "
     "justify it from specific evidence, and say so in plain prose. If the "
-    "evidence is genuinely inconclusive, say that instead of inventing a cause — "
+    "evidence is genuinely inconclusive, say that instead of inventing a cause - "
     "an honest 'needs a human' is a valid outcome. You have a limited number of "
     "tool calls, so spend them on the questions that would actually change your "
     "conclusion.\n\n"
@@ -94,8 +94,8 @@ _SYSTEM_PROMPT = (
     "You are an inventory-reconciliation analyst. A product's on-hand quantity "
     "in Odoo disagrees with the 'available' quantity in Shopify. Using the "
     "supplied evidence, determine the SINGLE most likely root cause and the "
-    "right corrective action. Reason carefully about the data — do not guess.\n\n"
-    "Causes to rule in or out before concluding — the snapshot has a bucket for "
+    "right corrective action. Reason carefully about the data - do not guess.\n\n"
+    "Causes to rule in or out before concluding - the snapshot has a bucket for "
     "each:\n"
     "- An open/aged move: a delivery shipped but never validated, or a receipt "
     "never recorded, so Odoo never applied it ('pending_outgoing_moves', "
@@ -105,7 +105,7 @@ _SYSTEM_PROMPT = (
     "- A manual inventory adjustment ('recent_inventory_adjustments'): someone "
     "forced the on-hand count. 'user' is who did it (a pseudonymised token such "
     "as 'Employee 42' - quote it as-is, a human sees the real name) and "
-    "'adjustment_reason' is why — quote both, since this is usually the whole "
+    "'adjustment_reason' is why - quote both, since this is usually the whole "
     "answer when one appears near the divergence.\n"
     "- Stock moved to another warehouse ('stock_by_location'): total on-hand is "
     "unchanged, so this is invisible in the headline numbers. Suspect it when "
@@ -115,7 +115,7 @@ _SYSTEM_PROMPT = (
     "against Odoo's sale orders. Ignore cancelled or unpaid Shopify orders.\n"
     "- Data inconsistency ('ledger_check'): if the move ledger does not add up "
     "to the quants, the database itself is inconsistent. This is rare and is "
-    "NOT a normal cause — no operator action can produce it. If 'balanced' is "
+    "NOT a normal cause - no operator action can produce it. If 'balanced' is "
     "false, report the inconsistency as the finding and escalate; do not try to "
     "explain the Shopify difference from it.\n"
     "- A duplicated SKU across product variants, so the two systems count "
@@ -124,7 +124,7 @@ _SYSTEM_PROMPT = (
     "number and Shopify's number even describe the same stock. Many stores keep "
     "a shop location that sells online plus a back warehouse that does not, and "
     "Odoo's headline on-hand sums both. If 'location_scope.warning' is present "
-    "the difference may not be a discrepancy at all — it may just be the "
+    "the difference may not be a discrepancy at all - it may just be the "
     "warehouse. In that case recommend 'no_action' and tell the manager to set "
     "the Shopify Stock Location in AI Ops settings; do NOT recommend "
     "'update_shopify', which would push warehouse stock into Shopify and "
@@ -133,7 +133,7 @@ _SYSTEM_PROMPT = (
     "- If Odoo has MORE stock than Shopify: the most common cause is a Shopify "
     "undercount from human error → recommend 'update_shopify' to set Shopify to "
     "Odoo's on-hand. BUT first check the evidence for alternatives: a Shopify "
-    "sale with no matching Odoo sales order (a 'missing_sale_order' — Odoo would "
+    "sale with no matching Odoo sales order (a 'missing_sale_order' - Odoo would "
     "then be overstating) → recommend 'create_missing_sale_order'; or an "
     "outgoing delivery already shipped but still open/aged in Odoo (it never "
     "decremented Odoo) → recommend 'validate_or_investigate_move' and list the "
@@ -155,7 +155,7 @@ def _build_tools(runtime):
     """The investigation toolbelt: read-only Odoo queries, nothing else.
 
     Every tool wraps a method on ``ai.ops.inventory`` that only reads. The two
-    write methods on that model are deliberately absent — see the module
+    write methods on that model are deliberately absent - see the module
     docstring. Failures are returned as text rather than raised so a bad
     argument lets the model correct itself instead of killing the run.
     """
@@ -196,7 +196,7 @@ def _build_tools(runtime):
         'confirmed', 'assigned'] to see moves that have not yet affected on-hand
         quantity. Filter with kinds: 'incoming', 'outgoing', 'internal_transfer'
         (moved between locations/warehouses), 'inventory_adjustment' (someone
-        set the count by hand — 'user' is who did it and 'adjustment_reason' is
+        set the count by hand - 'user' is who did it and 'adjustment_reason' is
         what they gave as the reason), 'scrap', 'other'."""
         return await _guard(
             "list_stock_moves",
@@ -210,7 +210,7 @@ def _build_tools(runtime):
         """Where the product's stock physically sits: quantity per location and
         warehouse, plus reserved vs available and the last count date. Odoo's
         headline on-hand sums every internal location, so stock moved to another
-        warehouse leaves the total unchanged and shows up nowhere else — check
+        warehouse leaves the total unchanged and shows up nowhere else - check
         this whenever the totals disagree but the move history looks clean, or
         whenever Shopify is fed from one location rather than the whole
         company."""
@@ -231,7 +231,7 @@ def _build_tools(runtime):
         """Consistency canary: check that Odoo's move ledger adds up to its
         quants. Everything an operator can do is journalled as a move, including
         editing on-hand by hand, so these should always agree. A gap means the
-        database is inconsistent — some code wrote the readonly quantity field
+        database is inconsistent - some code wrote the readonly quantity field
         directly. That is a bug to escalate, not an explanation for a Shopify
         difference. Rarely worth calling: only when no move, transfer,
         adjustment or sale accounts for the divergence."""
@@ -255,7 +255,7 @@ def _build_tools(runtime):
     async def list_shopify_orders(product_id: int, limit: int = 20, since_days: int = 30) -> list:
         """Recent Shopify orders containing this product's SKU, newest first,
         with each order's financial and fulfillment status. Compare against
-        list_sale_order_lines to find a Shopify sale that Odoo never recorded —
+        list_sale_order_lines to find a Shopify sale that Odoo never recorded -
         that is the only evidence that justifies 'create_missing_sale_order'.
         Check the statuses before concluding: a cancelled or unpaid Shopify
         order is not a missing sale."""
@@ -293,16 +293,11 @@ def build_reconciliation_graph(runtime):
 
     tools = _build_tools(runtime)
 
-    def _llm_config(state: ReconciliationState) -> dict | None:
-        if runtime.langfuse_handler is None:
-            return None
-        return {
-            "callbacks": [runtime.langfuse_handler],
-            "metadata": {
-                "odoo_task_ref": state.get("odoo_task_ref"),
-                "langfuse_session_id": state.get("odoo_task_ref"),
-            },
-        }
+    # Note: no per-call Langfuse config in this graph. The handler and session id
+    # come from the graph invocation (``AgentRuntime._trace_config``) and
+    # LangGraph propagates them into every node. Attaching them per call made
+    # each turn of the investigation loop its own rootless trace, which is how
+    # the loop's tokens went missing from the task's Langfuse session.
 
     async def gather(state: ReconciliationState) -> dict:
         product_id = state["product_id"]
@@ -348,10 +343,7 @@ def build_reconciliation_graph(runtime):
                 state.get("odoo_task_ref"),
                 loops,
             )
-        response = await chat.ainvoke(
-            [("system", _INVESTIGATE_PROMPT), *state["messages"]],
-            config=_llm_config(state),
-        )
+        response = await chat.ainvoke([("system", _INVESTIGATE_PROMPT), *state["messages"]])
         calls = getattr(response, "tool_calls", None) or []
         if calls:
             logger.info(
@@ -384,8 +376,7 @@ def build_reconciliation_graph(runtime):
                     "verdict. Base 'reasoning' on the specific evidence you "
                     "gathered, and cite the move ids you relied on.",
                 ),
-            ],
-            config=_llm_config(state),
+            ]
         )
         logger.info(
             "[%s] diagnosis after %s loops: direction=%s action=%s confidence=%.2f",

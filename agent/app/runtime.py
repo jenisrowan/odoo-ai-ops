@@ -76,7 +76,7 @@ class AgentRuntime:
         if settings.slack_enabled:
             self.slack_client = SlackClient(settings.slack_bot_token, settings.slack_channel)
         self.langfuse_handler = build_langfuse_handler(settings)
-        self.checkpointer, self._checkpointer_cm = await build_checkpointer(settings.valkey_url)
+        self.checkpointer, self._checkpointer_cm = await build_checkpointer(settings)
         self.fraud_graph = build_fraud_graph(self)
         self.reconciliation_graph = build_reconciliation_graph(self)
         logger.info("AgentRuntime initialized.")
@@ -92,6 +92,32 @@ class AgentRuntime:
     # ------------------------------------------------------------------
     # Workflow entry points
     # ------------------------------------------------------------------
+    def _trace_config(self, run_id: str, odoo_task_ref: str | None, **extra) -> dict:
+        """Build the RunnableConfig for a whole workflow run.
+
+        The Langfuse handler is attached *here*, at the graph invocation, rather
+        than around each individual model call inside the nodes. LangGraph
+        propagates this config down to every node and every nested model call,
+        so one run produces one trace with each generation nested underneath it,
+        all carrying the Odoo task reference as the Langfuse session id.
+
+        Attaching it per-call instead makes every model call its own *root*
+        trace. Only calls made through a chain (``with_structured_output``) kept
+        the session id that way; a bare ``chat.ainvoke`` did not. The multi-turn
+        reconciliation loop is exactly the latter, so its turns - the bulk of the
+        tokens in a reconciliation - became unattributable to any task.
+        """
+        config: dict = {"configurable": {"thread_id": run_id}}
+        if self.langfuse_handler is not None:
+            config["callbacks"] = [self.langfuse_handler]
+            config["metadata"] = {
+                "langfuse_session_id": odoo_task_ref,
+                "odoo_task_ref": odoo_task_ref,
+                "run_id": run_id,
+                **{k: v for k, v in extra.items() if v is not None},
+            }
+        return config
+
     async def start_fraud(self, req: FraudTaskRequest, run_id: str | None = None) -> str:
         run_id = run_id or f"fr-{uuid.uuid4()}"
         state = {
@@ -101,7 +127,7 @@ class AgentRuntime:
             "risk_level": req.risk_level,
             "order": req.order,
         }
-        config = {"configurable": {"thread_id": run_id}}
+        config = self._trace_config(run_id, req.odoo_task_ref, risk_level=req.risk_level)
         # Runs through to the approval interrupt, then pauses (persisted to Valkey).
         await self.fraud_graph.ainvoke(state, config=config)
         logger.info("Fraud workflow %s paused for approval (%s).", run_id, req.odoo_task_ref)
@@ -118,7 +144,7 @@ class AgentRuntime:
             "product_id": req.product_id,
             "context": req.context,
         }
-        config = {"configurable": {"thread_id": run_id}}
+        config = self._trace_config(run_id, req.odoo_task_ref, product_id=req.product_id)
         await self.reconciliation_graph.ainvoke(state, config=config)
         logger.info("Reconciliation workflow %s paused for approval.", run_id)
         return run_id
@@ -140,8 +166,7 @@ class AgentRuntime:
         (double-writing the decision to Odoo).
         """
         graph = self._graph_for(run_id)
-        config = {"configurable": {"thread_id": run_id}}
-        snapshot = await graph.aget_state(config)
+        snapshot = await graph.aget_state({"configurable": {"thread_id": run_id}})
         if not snapshot.next:
             logger.warning(
                 "Ignoring resume for %s: no paused workflow (unknown, already decided, "
@@ -150,6 +175,9 @@ class AgentRuntime:
             )
             return False
         resume_value = {"decision": decision, "manager_name": manager_name, "note": note}
+        # The resumed half of the run traces into the same Langfuse session as the
+        # half that ran before the interrupt, so a task reads as one story.
+        config = self._trace_config(run_id, snapshot.values.get("odoo_task_ref"), decision=decision)
         await graph.ainvoke(Command(resume=resume_value), config=config)
         logger.info("Resumed workflow %s with decision=%s.", run_id, decision)
         return True

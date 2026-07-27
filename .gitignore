@@ -225,7 +225,7 @@ __marimo__/
 
 *.tfvars
 
-# .terraform.lock.hcl IS committed (provider checksum lock — HashiCorp's
+# .terraform.lock.hcl IS committed (provider checksum lock - HashiCorp's
 # recommended practice for reproducible provider versions across machines/CI).
 
 # Recorded webhook deliveries from the local edge shim: real order payloads

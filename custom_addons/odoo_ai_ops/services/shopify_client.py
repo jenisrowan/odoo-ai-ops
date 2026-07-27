@@ -476,7 +476,7 @@ class ShopifyClient:
     def list_orders_for_sku(self, sku, limit=20, since_days=30):
         """Return recent Shopify orders containing ``sku``, newest first.
 
-        Answers "did Shopify sell this that Odoo never heard about?" — the
+        Answers "did Shopify sell this that Odoo never heard about?" - the
         evidence behind the ``create_missing_sale_order`` resolution. Each row
         carries only the line items for the requested SKU, plus the order's
         financial and fulfillment status so a cancelled or unpaid order is not

@@ -1,11 +1,11 @@
-# Native `terraform test` — PLAN mode.
+# Native `terraform test` - PLAN mode.
 #
 # Validates the doc-critical invariants that are known at plan time (Graviton
 # instance families, RDS class + Multi-AZ, Lambda runtime). Uses the REAL AWS
 # provider (no mocks), so it must run with valid AWS credentials and requires
 # the odoo/admin/password + odoo/integration/credentials secrets to exist
 # (data sources are read during plan). Run via the manual "Terraform Test"
-# workflow. Nothing is created — `command = plan` only.
+# workflow. Nothing is created - `command = plan` only.
 
 run "invariants_match_docs" {
   command = plan

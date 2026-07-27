@@ -4,8 +4,8 @@
 Two layers:
 
 * pure-function tests for ``services/pii.py`` (no Odoo needed);
-* an end-to-end check that ``ai.ops.task._fraud_order_context`` — the thing that
-  actually builds the payload sent to the agent/Anthropic — emits no personal
+* an end-to-end check that ``ai.ops.task._fraud_order_context`` - the thing that
+  actually builds the payload sent to the agent/Anthropic - emits no personal
   data, plus the reconciliation name round-trip through ``ai_ops_rehydrate``.
 
 The end-to-end fraud check is the one that matters: it asserts against the real

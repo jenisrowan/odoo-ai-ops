@@ -42,6 +42,28 @@ class Settings(BaseSettings):
 
     # --- Valkey / Redis (LangGraph checkpoints + telemetry buffer) ---
     valkey_url: str = Field(default="", description="rediss://host:port URL.")
+    # Without a socket timeout a stalled connection never returns: the awaiting
+    # coroutine parks forever and the worker is wedged with no error to act on.
+    # Checkpoint reads/writes are millisecond operations, so seconds here are
+    # already generous; the point is that a stall surfaces as a TimeoutError the
+    # caller can retry (SQS redelivers) instead of an invisible hang.
+    valkey_socket_timeout: float = Field(
+        default=10.0, description="Seconds to wait on a Valkey read/write before failing."
+    )
+    valkey_connect_timeout: float = Field(
+        default=5.0, description="Seconds to wait for a Valkey connection to establish."
+    )
+    valkey_health_check_interval: float = Field(
+        default=30.0, description="Seconds between idle-connection health pings (0 disables)."
+    )
+    # How long a paused workflow stays resumable. A fraud or reconciliation run
+    # sits at the human-approval interrupt until a manager clicks Approve/Reject,
+    # so this is effectively the manager's deadline: 5 days, then the checkpoint
+    # expires and `resume()` reports the thread as unknown rather than acting on
+    # a stale decision. Applied on write, so the clock runs from the pause.
+    checkpoint_ttl_minutes: int = Field(
+        default=5 * 24 * 60, description="Valkey TTL for checkpoints, in minutes (default 5 days)."
+    )
 
     # --- Slack ---
     slack_bot_token: str = Field(default="")

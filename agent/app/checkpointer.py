@@ -21,13 +21,29 @@ from langgraph.checkpoint.memory import MemorySaver
 logger = logging.getLogger(__name__)
 
 
-async def build_checkpointer(valkey_url: str):
+async def build_checkpointer(settings):
     """Return ``(saver, context_manager_or_none)``.
 
     When the Redis saver is used it must stay open for the process lifetime; the
     caller keeps the returned async context manager and passes it to
     :func:`close_checkpointer` on shutdown.
+
+    Two things are deliberately configured rather than left at their defaults:
+
+    *Socket timeouts.* By default the client waits forever for a reply. A
+    connection that stalls mid-command - the server holding a partial frame
+    while the client waits on a response that never comes - parks the awaiting
+    coroutine indefinitely, so the workflow neither completes nor fails and the
+    worker is wedged with nothing in the logs. A timeout turns that into a
+    ``TimeoutError``: the run fails, SQS redelivers, and the worker stays usable.
+
+    *Checkpoint TTL.* Paused workflows would otherwise live in Valkey forever,
+    so a run nobody ever decided keeps its state indefinitely and stays
+    resumable long after the decision stopped being meaningful. The TTL bounds
+    that at ``checkpoint_ttl_minutes`` (5 days by default) from the moment the
+    workflow pauses.
     """
+    valkey_url = settings.valkey_url
     if not valkey_url:
         logger.warning(
             "VALKEY_URL not set - using in-memory checkpointer "
@@ -37,11 +53,32 @@ async def build_checkpointer(valkey_url: str):
 
     from langgraph.checkpoint.redis.aio import AsyncRedisSaver
 
-    cm = AsyncRedisSaver.from_conn_string(valkey_url)
+    connection_args = {
+        "socket_timeout": settings.valkey_socket_timeout,
+        "socket_connect_timeout": settings.valkey_connect_timeout,
+        # Keepalive plus periodic health pings so a connection broken by an idle
+        # NAT/ELB timeout is discovered and replaced, not handed out dead.
+        "socket_keepalive": True,
+        "health_check_interval": settings.valkey_health_check_interval,
+        # Checkpoint writes are idempotent (JSON.SET on a deterministic key), so
+        # transparently retrying a timed-out command cannot double-apply.
+        "retry_on_timeout": True,
+    }
+    # TTL is expressed in minutes by langgraph-checkpoint-redis. refresh_on_read
+    # stays off: the deadline should run from when the workflow paused, not be
+    # extended every time something inspects the state.
+    ttl = {"default_ttl": settings.checkpoint_ttl_minutes, "refresh_on_read": False}
+
+    cm = AsyncRedisSaver.from_conn_string(valkey_url, connection_args=connection_args, ttl=ttl)
     saver = await cm.__aenter__()
     # Create the required Redis indices/keys once.
     await saver.asetup()
-    logger.info("Initialized Valkey-backed LangGraph checkpointer.")
+    logger.info(
+        "Initialized Valkey-backed LangGraph checkpointer "
+        "(socket_timeout=%ss, checkpoint TTL=%s minutes).",
+        settings.valkey_socket_timeout,
+        settings.checkpoint_ttl_minutes,
+    )
     return saver, cm
 
 
