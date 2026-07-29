@@ -110,6 +110,12 @@ block becomes `## [1.0.0] - <date>` and a fresh empty `Unreleased` opens above i
 - Comprehensive system documentation and PlantUML C4 Context, Container, and Component diagrams.
 
 ### Changed
+- **State locking moved from DynamoDB into S3.** The backend's deprecated `dynamodb_table` is
+  replaced by `use_lockfile = true`, which takes the lock as a conditional PUT of a `.tflock`
+  object beside the state file - one less resource to keep alive, pay for and lose track of.
+  The Terraform floor rises to `~> 1.10` accordingly (every workflow already runs 1.15.7). The
+  `odoo-terraform-state-locks` table was never in the configuration, so Terraform will not remove
+  it; delete it by hand once no older Terraform is still pointed at this state.
 - **Payload parsing matches reality**: `_extract` in the order-risk gatekeeper now parses exactly
   the real `orders/risk_assessment_changed` shape (flat `order_id` + `risk_level`, verified
   against captured production deliveries). Removed the speculative REST-era layer - nested
@@ -122,7 +128,7 @@ block becomes `## [1.0.0] - <date>` and a fresh empty `Unreleased` opens above i
 - **Module dependency**: `odoo_ai_ops` now depends on `sale`.
 - **Security Hardening**: Disabled Odoo database manager, enabled VPC-only proxy trust (`X-Forwarded-For`), enforced Slack webhook signature verification, and made Shopify cancellations refund-optional (opt-in).
 - **Deployment Safety**: Configured ECS deployment circuit breakers on all services to automatically roll back failing tasks.
-- **Dependency & Build Lock**: Pinned all versions (Terraform ~> 1.6, AWS providers, and Python dependencies) and locked GitHub Actions workflow setups.
+- **Dependency & Build Lock**: Pinned all versions (Terraform, AWS providers, and Python dependencies) and locked GitHub Actions workflow setups.
 - **Compute Architecture**: Migrated all services to custom Arm64 Graviton instances (Odoo, FastAPI, RDS, ClickHouse) and modularized Terraform configuration.
 - **Modernized Runtime**: Upgraded the execution environment to Python 3.14.
 - Established baseline highly-available Odoo 19 hosting stack by merging the `hosting-only` baseline and purging legacy serverless AI components.

@@ -163,7 +163,7 @@ phone, IP or coordinates, so the guarantee breaks loudly if anyone later widens 
 
 ### Prerequisites
 
-* [Terraform](https://www.terraform.io/downloads.html) (>= 1.6 - `terraform/versions.tf` pins `~> 1.6`, and the native `terraform test` suites need 1.6+)
+* [Terraform](https://www.terraform.io/downloads.html) (>= 1.10 - `terraform/versions.tf` pins `~> 1.10`, the floor for the backend's S3-native state locking; the native `terraform test` suites need 1.6+)
 * AWS CLI configured with appropriate permissions.
 * Docker (for building and pushing custom images to ECR).
 
