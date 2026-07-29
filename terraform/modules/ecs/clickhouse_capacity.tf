@@ -35,9 +35,32 @@ resource "aws_autoscaling_group" "clickhouse_asg" {
     create_before_destroy = true
   }
 
-  launch_template {
-    id      = aws_launch_template.clickhouse.id
-    version = "$Latest"
+  # One on-demand node, but let the ASG walk a list of interchangeable Graviton
+  # types instead of insisting on a single one: a lone r6g.xlarge is exactly the
+  # shape of request an AZ refuses when it is short on capacity, and the failed
+  # scaling activity takes the whole apply down with it. "prioritized" keeps the
+  # preferred type first and only steps down the list when a launch is refused.
+  # Normally you should be reserving an instance for clickhouse, but for dev we will get the best possible system
+  mixed_instances_policy {
+    instances_distribution {
+      on_demand_base_capacity                  = 1
+      on_demand_percentage_above_base_capacity = 100
+      on_demand_allocation_strategy            = "prioritized"
+    }
+
+    launch_template {
+      launch_template_specification {
+        launch_template_id = aws_launch_template.clickhouse.id
+        version            = "$Latest"
+      }
+
+      dynamic "override" {
+        for_each = concat([var.clickhouse_instance_type], var.clickhouse_fallback_instance_types)
+        content {
+          instance_type = override.value
+        }
+      }
+    }
   }
 
   tag {

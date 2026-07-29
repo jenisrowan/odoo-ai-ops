@@ -19,6 +19,15 @@ variable "clickhouse_instance_type" {
   default = "r6g.xlarge"
 }
 
+# Fallbacks tried, in order, when the preferred type above has no capacity in
+# the AZ the ASG picked (ap-south-1a ran dry on r6g.xlarge and failed a deploy).
+# Every entry must be arm64 and big enough for the ClickHouse task reservation
+# (3584 CPU units / 30720 MiB), so: >= 4 vCPU and >= 32 GiB.
+variable "clickhouse_fallback_instance_types" {
+  type    = list(string)
+  default = ["r7g.xlarge", "r6gd.xlarge", "m6g.2xlarge", "m7g.2xlarge", "r6g.2xlarge"]
+}
+
 # Networking
 variable "vpc_id" { type = string }
 variable "private_subnet_ids" { type = list(string) }
