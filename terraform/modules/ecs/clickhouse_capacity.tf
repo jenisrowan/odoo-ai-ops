@@ -31,6 +31,9 @@ resource "aws_autoscaling_group" "clickhouse_asg" {
   desired_capacity      = 1
   protect_from_scale_in = true
 
+  # Forced delete on destroy - see the note on aws_autoscaling_group.ecs_asg.
+  force_delete = true
+
   lifecycle {
     create_before_destroy = true
   }

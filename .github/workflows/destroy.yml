@@ -35,6 +35,41 @@ jobs:
       working-directory: ./terraform
       run: terraform init -input=false
 
+    # Nothing may relaunch while the teardown runs. Suspend each Auto Scaling
+    # group, drop it to zero, and clear the scale-in protection that ECS managed
+    # termination protection puts on its instances - otherwise the group keeps
+    # replacing the very instances Terraform is trying to delete. Best-effort by
+    # design: a failure here only makes the destroy slower, so it must not stop
+    # it (the force_delete flags in the config do the real work).
+    - name: Freeze Auto Scaling groups
+      working-directory: ./terraform
+      run: |
+        asgs="$(terraform show -json | jq -r '
+          [.. | objects
+             | select(.type? == "aws_autoscaling_group" and has("values"))
+             | .values.name // empty] | unique | .[]' || true)"
+        for asg in $asgs; do
+          echo "freezing $asg"
+          aws autoscaling suspend-processes --auto-scaling-group-name "$asg" \
+            || echo "  warning: could not suspend $asg"
+          aws autoscaling update-auto-scaling-group --auto-scaling-group-name "$asg" \
+            --min-size 0 --desired-capacity 0 \
+            || echo "  warning: could not scale $asg to zero"
+          ids="$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names "$asg" \
+            --query 'AutoScalingGroups[0].Instances[].InstanceId' --output text || true)"
+          if [ -n "$ids" ]; then
+            aws autoscaling set-instance-protection --auto-scaling-group-name "$asg" \
+              --instance-ids $ids --no-protected-from-scale-in \
+              || echo "  warning: could not clear scale-in protection on $asg"
+          fi
+        done
+
+    # Log-group retention is declarative: every aws_cloudwatch_log_group in the
+    # config sets `skip_destroy = true`, so the destroy below drops them from
+    # state and leaves the logs in CloudWatch. (This used to be a `terraform
+    # state rm` step here; the deploy workflow re-adopts them on the way up.)
+
     # Fast + forceful full teardown (everything, including WAF & CloudFront).
     #   -refresh=false : skip the state-refresh pass (biggest speedup)
     #   -parallelism=30: more concurrent deletes (default is 10)
@@ -42,17 +77,6 @@ jobs:
     # All image vars have defaults, so none are needed for a destroy.
     # CloudFront (~20 min to delete) dominates the wall-clock; everything
     # expensive (RDS, ElastiCache, ECS, NAT, EBS) is gone within a few minutes.
-    - name: Retain CloudWatch Logs
-      working-directory: ./terraform
-      run: |
-        # Remove log groups from Terraform state so they survive the destroy
-        terraform state rm module.ecs.aws_cloudwatch_log_group.odoo_logs || true
-        terraform state rm module.ecs.aws_cloudwatch_log_group.fastapi_logs || true
-        terraform state rm module.telemetry.aws_cloudwatch_log_group.clickhouse || true
-        terraform state rm module.telemetry.aws_cloudwatch_log_group.langfuse || true
-        terraform state rm module.webhooks.aws_cloudwatch_log_group.webhook_lambda || true
-        terraform state rm module.webhooks.aws_cloudwatch_log_group.apigw_access || true
-
     - name: Terraform Destroy
       working-directory: ./terraform
       run: |

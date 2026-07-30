@@ -1,8 +1,10 @@
 # Langfuse server (web + worker) on ECS Fargate Spot for cost optimization.
 
+# Retained across teardown - see the note on module.ecs's log groups.
 resource "aws_cloudwatch_log_group" "langfuse" {
   name              = "/ecs/langfuse"
   retention_in_days = 14
+  skip_destroy      = true
 }
 
 resource "aws_ecs_task_definition" "langfuse" {
@@ -36,6 +38,9 @@ resource "aws_ecs_service" "langfuse" {
   cluster         = var.cluster_id
   task_definition = aws_ecs_task_definition.langfuse.arn
   desired_count   = 1
+
+  # Forced delete on destroy - see the note on module.ecs's aws_ecs_service.odoo.
+  force_delete = true
 
   # Fargate Spot for cost; the agent buffers telemetry in Valkey so brief Spot
   # reclamations don't drop traces.

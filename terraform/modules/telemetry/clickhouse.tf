@@ -1,9 +1,11 @@
 # ClickHouse analytical service: EC2 (r6g.xlarge, arm64), hot data on an
 # ECS-managed io2 EBS volume, older partitions tiered to S3.
 
+# Retained across teardown - see the note on module.ecs's log groups.
 resource "aws_cloudwatch_log_group" "clickhouse" {
   name              = "/ecs/clickhouse"
   retention_in_days = 14
+  skip_destroy      = true
 }
 
 resource "aws_ecs_task_definition" "clickhouse" {
@@ -40,6 +42,9 @@ resource "aws_ecs_service" "clickhouse" {
   cluster         = var.cluster_id
   task_definition = aws_ecs_task_definition.clickhouse.arn
   desired_count   = 1
+
+  # Forced delete on destroy - see the note on module.ecs's aws_ecs_service.odoo.
+  force_delete = true
 
   enable_execute_command = true
 

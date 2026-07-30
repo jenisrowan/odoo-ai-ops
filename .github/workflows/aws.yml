@@ -110,6 +110,32 @@ jobs:
           cache-from: type=gha,scope=clickhouse
           cache-to: type=gha,mode=max,scope=clickhouse
 
+      # Log groups are retained across a teardown (skip_destroy), so after a
+      # destroy they exist in CloudWatch but not in state and CreateLogGroup
+      # would fail with ResourceAlreadyExistsException. Adopt whatever is
+      # actually there; already-managed groups are skipped, and a group that
+      # doesn't exist yet is simply created by the apply below.
+      - name: Adopt retained CloudWatch log groups
+        if: ${{ inputs.apply_infra }}
+        working-directory: ./terraform
+        run: |
+          managed="$(terraform state list)"
+          adopt() {
+            if grep -qxF "$1" <<<"$managed"; then
+              echo "already managed: $1"
+            elif terraform import -input=false -lock-timeout=5m "$1" "$2"; then
+              echo "adopted existing log group: $2"
+            else
+              echo "no existing log group $2 - the apply will create it"
+            fi
+          }
+          adopt module.ecs.aws_cloudwatch_log_group.odoo_logs            /ecs/odoo
+          adopt module.ecs.aws_cloudwatch_log_group.fastapi_logs         /ecs/fastapi
+          adopt module.telemetry.aws_cloudwatch_log_group.clickhouse     /ecs/clickhouse
+          adopt module.telemetry.aws_cloudwatch_log_group.langfuse       /ecs/langfuse
+          adopt module.webhooks.aws_cloudwatch_log_group.webhook_lambda  /aws/lambda/odoo-webhook-authorizer
+          adopt module.webhooks.aws_cloudwatch_log_group.apigw_access    /aws/apigateway/odoo-webhooks
+
       # Full apply rolls out new task-definition revisions referencing the new
       # image tags -> ECS performs a rolling deployment for each service.
       - name: Terraform Apply (rolling deploy)

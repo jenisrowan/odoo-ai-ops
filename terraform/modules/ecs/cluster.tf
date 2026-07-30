@@ -49,12 +49,18 @@ resource "aws_ecs_cluster_capacity_providers" "odoo" {
   }
 }
 
+# Log groups outlive the stack: `skip_destroy` drops them from state on destroy
+# but leaves the logs themselves in CloudWatch, so a teardown never loses
+# forensic history. The deploy workflow re-adopts them (terraform import) before
+# the next apply - without that, CreateLogGroup fails on an existing group.
 resource "aws_cloudwatch_log_group" "odoo_logs" {
   name              = "/ecs/odoo"
   retention_in_days = 14
+  skip_destroy      = true
 }
 
 resource "aws_cloudwatch_log_group" "fastapi_logs" {
   name              = "/ecs/fastapi"
   retention_in_days = 14
+  skip_destroy      = true
 }

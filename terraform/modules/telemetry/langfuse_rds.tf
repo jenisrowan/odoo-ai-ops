@@ -21,5 +21,9 @@ resource "aws_db_instance" "langfuse" {
 
   db_subnet_group_name   = aws_db_subnet_group.langfuse.name
   vpc_security_group_ids = [var.langfuse_rds_sg_id]
-  skip_final_snapshot    = true
+
+  # Same teardown posture as the primary - see modules/data/main.tf.
+  skip_final_snapshot      = true
+  delete_automated_backups = true
+  deletion_protection      = false
 }

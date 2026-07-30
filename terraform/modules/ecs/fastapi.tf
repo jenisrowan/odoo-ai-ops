@@ -87,6 +87,9 @@ resource "aws_autoscaling_group" "fastapi_asg" {
   desired_capacity      = 1
   protect_from_scale_in = true
 
+  # Forced delete on destroy - see the note on aws_autoscaling_group.ecs_asg.
+  force_delete = true
+
   lifecycle {
     create_before_destroy = true
   }
@@ -167,6 +170,9 @@ resource "aws_ecs_service" "fastapi" {
   cluster         = aws_ecs_cluster.odoo.id
   task_definition = aws_ecs_task_definition.fastapi.arn
   desired_count   = 1
+
+  # Forced delete on destroy - see the note on aws_ecs_service.odoo.
+  force_delete = true
 
   depends_on             = [aws_ecs_cluster_capacity_providers.odoo]
   enable_execute_command = true

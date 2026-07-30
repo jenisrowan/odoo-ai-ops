@@ -6,10 +6,15 @@
 # it is never triggered on push, and it will incur real (short-lived) AWS cost.
 #
 # Isolation: it applies under a distinct name_prefix so prefixed resources won't
-# collide with a deployed "odoo" stack. NOTE the few fixed-name resources (ECR
-# repos: odoo-custom/nginx-custom/fastapi-agent/clickhouse-custom) are NOT
-# prefixed - run this in an account where those repos don't already exist (e.g.
-# a clean/sandbox account), or the ECR creation will conflict.
+# collide with a deployed "odoo" stack. NOTE the few fixed-name resources are NOT
+# prefixed - run this in an account where they don't already exist (e.g. a
+# clean/sandbox account), or creating them will conflict:
+#   - ECR repos: odoo-custom / nginx-custom / fastapi-agent / clickhouse-custom
+#   - log groups: /ecs/odoo, /ecs/fastapi, /ecs/clickhouse, /ecs/langfuse. These
+#     names are deliberately fixed so a rebuild keeps writing to the same groups
+#     rather than spawning new ones, and they carry skip_destroy = true - so an
+#     apply-mode test leaves them behind and a second run conflicts. Delete them
+#     by hand between runs in a sandbox account.
 #
 # Prerequisites: valid AWS creds, the odoo/admin/password +
 # odoo/integration/credentials secrets present, and the S3 state backend

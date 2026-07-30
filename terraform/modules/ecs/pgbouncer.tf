@@ -29,6 +29,9 @@ resource "aws_ecs_service" "pgbouncer" {
   task_definition = aws_ecs_task_definition.pgbouncer.arn
   desired_count   = 2
 
+  # Forced delete on destroy - see the note on aws_ecs_service.odoo.
+  force_delete = true
+
   capacity_provider_strategy {
     capacity_provider = aws_ecs_capacity_provider.pgbouncer.name
     weight            = 100
@@ -84,6 +87,9 @@ resource "aws_autoscaling_group" "pgbouncer_asg" {
   max_size              = 2
   desired_capacity      = 2
   protect_from_scale_in = true
+
+  # Forced delete on destroy - see the note on aws_autoscaling_group.ecs_asg.
+  force_delete = true
 
   launch_template {
     id      = aws_launch_template.pgbouncer.id

@@ -75,9 +75,11 @@ resource "aws_iam_role_policy" "webhook_lambda_policy" {
   })
 }
 
+# Retained across teardown - see the note on module.ecs's log groups.
 resource "aws_cloudwatch_log_group" "webhook_lambda" {
   name              = "/aws/lambda/${var.name_prefix}-webhook-authorizer"
   retention_in_days = 14
+  skip_destroy      = true
 }
 
 resource "aws_lambda_function" "webhook_authorizer" {
@@ -125,6 +127,7 @@ resource "aws_apigatewayv2_route" "webhook_post" {
 resource "aws_cloudwatch_log_group" "apigw_access" {
   name              = "/aws/apigateway/${var.name_prefix}-webhooks"
   retention_in_days = 14
+  skip_destroy      = true
 }
 
 resource "aws_apigatewayv2_stage" "default" {

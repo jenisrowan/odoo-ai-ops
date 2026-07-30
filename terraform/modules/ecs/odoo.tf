@@ -30,6 +30,12 @@ resource "aws_autoscaling_group" "ecs_asg" {
   desired_capacity      = 1
   protect_from_scale_in = true
 
+  # Delete the group together with its instances instead of waiting for each one
+  # to drain first. Scale-in protection above is required by the capacity
+  # provider's managed termination protection, and without a forced delete it is
+  # exactly what leaves a teardown stuck on instances the ASG may not terminate.
+  force_delete = true
+
   lifecycle {
     create_before_destroy = true
   }
@@ -125,6 +131,11 @@ resource "aws_ecs_service" "odoo" {
   cluster         = aws_ecs_cluster.odoo.id
   task_definition = aws_ecs_task_definition.odoo.arn
   desired_count   = 1
+
+  # Destroy kills the running tasks outright instead of scaling to zero and
+  # waiting for them to drain out of the target group, which is what left
+  # teardowns sitting on "Still destroying..." for a quarter of an hour.
+  force_delete = true
 
   depends_on                        = [aws_ecs_service.pgbouncer, aws_ecs_cluster_capacity_providers.odoo]
   health_check_grace_period_seconds = 90
