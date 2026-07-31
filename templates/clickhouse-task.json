@@ -26,6 +26,13 @@
     "mountPoints": [
       { "sourceVolume": "clickhouse-data", "containerPath": "/var/lib/clickhouse" }
     ],
+    "healthCheck": {
+      "command": ["CMD-SHELL", "wget --spider -q http://127.0.0.1:8123/ping || exit 1"],
+      "interval": 15,
+      "timeout": 5,
+      "retries": 5,
+      "startPeriod": 180
+    },
     "logConfiguration": {
       "logDriver": "awslogs",
       "options": {

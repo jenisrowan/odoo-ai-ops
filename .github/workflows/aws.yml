@@ -115,18 +115,40 @@ jobs:
       # would fail with ResourceAlreadyExistsException. Adopt whatever is
       # actually there; already-managed groups are skipped, and a group that
       # doesn't exist yet is simply created by the apply below.
+      #
+      # Existence is checked against CloudWatch first, so a failed import is
+      # never mistaken for an absent group. That distinction matters: if an
+      # import breaks (permissions, throttling, a bad address) the apply below
+      # is guaranteed to die on ResourceAlreadyExistsException, so fail here
+      # instead - with the reason - rather than 20 minutes later without it.
       - name: Adopt retained CloudWatch log groups
         if: ${{ inputs.apply_infra }}
         working-directory: ./terraform
         run: |
+          set -euo pipefail
           managed="$(terraform state list)"
+          failed=0
           adopt() {
-            if grep -qxF "$1" <<<"$managed"; then
-              echo "already managed: $1"
-            elif terraform import -input=false -lock-timeout=5m "$1" "$2"; then
-              echo "adopted existing log group: $2"
+            addr="$1"; name="$2"
+            if grep -qxF "$addr" <<<"$managed"; then
+              echo "already managed: $addr"
+              return 0
+            fi
+            # describe-log-groups matches on prefix, so re-filter for the exact
+            # name (/ecs/odoo must not match /ecs/odoo-something). An AWS-side
+            # failure here aborts the step via set -e rather than being read as
+            # "absent".
+            found="$(aws logs describe-log-groups --log-group-name-prefix "$name" \
+              --query "logGroups[?logGroupName=='$name'].logGroupName" --output text)"
+            if [ "$found" != "$name" ]; then
+              echo "no existing log group $name - the apply will create it"
+              return 0
+            fi
+            if terraform import -input=false -lock-timeout=5m "$addr" "$name"; then
+              echo "adopted existing log group: $name"
             else
-              echo "no existing log group $2 - the apply will create it"
+              echo "::error::log group $name exists but could not be imported into $addr"
+              failed=1
             fi
           }
           adopt module.ecs.aws_cloudwatch_log_group.odoo_logs            /ecs/odoo
@@ -135,6 +157,7 @@ jobs:
           adopt module.telemetry.aws_cloudwatch_log_group.langfuse       /ecs/langfuse
           adopt module.webhooks.aws_cloudwatch_log_group.webhook_lambda  /aws/lambda/odoo-webhook-authorizer
           adopt module.webhooks.aws_cloudwatch_log_group.apigw_access    /aws/apigateway/odoo-webhooks
+          exit "$failed"
 
       # Full apply rolls out new task-definition revisions referencing the new
       # image tags -> ECS performs a rolling deployment for each service.

@@ -109,6 +109,14 @@ resource "aws_ecs_capacity_provider" "pgbouncer" {
   auto_scaling_group_provider {
     auto_scaling_group_arn         = aws_autoscaling_group.pgbouncer_asg.arn
     managed_termination_protection = "ENABLED"
+    # Replacing an instance must not take live pooled connections with it. ECS
+    # drains the container instance and stops the task properly - pgbouncer
+    # treats SIGTERM as a graceful shutdown, refusing new clients while existing
+    # ones finish - instead of the task dying with its host. Costs nothing at
+    # teardown: destroy.yml drains every service to zero before the ASGs are
+    # touched, and a forced ASG delete discards outstanding lifecycle actions,
+    # so there is never anything left for this to hold up.
+    managed_draining = "ENABLED"
 
     managed_scaling {
       maximum_scaling_step_size = 1

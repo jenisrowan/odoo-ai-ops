@@ -35,6 +35,72 @@ jobs:
       working-directory: ./terraform
       run: terraform init -input=false
 
+    # Stop the tasks before anything touches the capacity they run on.
+    #
+    # Deleting an ECS service does not return until every one of its tasks has
+    # stopped, and `force_delete` does not change that - it only skips
+    # Terraform's own scale-to-zero, then still polls for INACTIVE (20 minutes
+    # by default). Draining here, while the instances are healthy and their ECS
+    # agents still connected, is what makes those DeleteService calls return in
+    # seconds instead of sitting at "Still destroying" for a quarter of an hour.
+    #
+    # Order matters: this MUST come before the ASGs are frozen. Freezing first
+    # pulls capacity out from under tasks that have not been told to stop yet,
+    # and a task whose host disappears leaves its service draining until the
+    # control plane reaps it server-side - which Terraform can only sit and
+    # wait for. Slow teardowns here were services still holding tasks:
+    # clickhouse detaches an ECS-managed io2 volume on stop and its containers
+    # get a 120s stopTimeout, and pgbouncer has Service Connect registrations
+    # to tear down.
+    #
+    # Best-effort, like the freeze below: a failure only makes the destroy
+    # slower, never wrong - force_delete in the config still does the real work.
+    - name: Drain ECS services
+      working-directory: ./terraform
+      run: |
+        cluster="$(terraform show -json | jq -r '
+          [.. | objects
+             | select(.type? == "aws_ecs_cluster" and has("values"))
+             | .values.name // empty] | unique | .[0] // empty' || true)"
+        if [ -z "$cluster" ]; then
+          echo "no ECS cluster in state - nothing to drain"
+          exit 0
+        fi
+        # list-services returns only ACTIVE services, so anything already gone
+        # is skipped. The stack has well under the 10-service describe cap.
+        svcs="$(aws ecs list-services --cluster "$cluster" \
+          --query 'serviceArns[]' --output text || true)"
+        if [ -z "$svcs" ]; then
+          echo "no active services in $cluster - nothing to drain"
+          exit 0
+        fi
+        for svc in $svcs; do
+          echo "draining $svc"
+          aws ecs update-service --cluster "$cluster" --service "$svc" \
+            --desired-count 0 >/dev/null \
+            || echo "  warning: could not scale $svc to zero"
+        done
+        deadline=$(( SECONDS + 600 ))
+        while true; do
+          counts="$(aws ecs describe-services --cluster "$cluster" --services $svcs \
+            --query 'services[].runningCount' --output text)" || {
+              echo "  warning: could not read running counts - continuing to the destroy"
+              exit 0
+            }
+          total=0
+          for c in $counts; do total=$(( total + c )); done
+          if [ "$total" -eq 0 ]; then
+            echo "all tasks stopped - services will delete cleanly"
+            exit 0
+          fi
+          if [ "$SECONDS" -ge "$deadline" ]; then
+            echo "  warning: $total task(s) still running after 10m - continuing to the destroy"
+            exit 0
+          fi
+          echo "  $total task(s) still running..."
+          sleep 15
+        done
+
     # Nothing may relaunch while the teardown runs. Suspend each Auto Scaling
     # group, drop it to zero, and clear the scale-in protection that ECS managed
     # termination protection puts on its instances - otherwise the group keeps
